@@ -1,36 +1,36 @@
 [gd_scene load_steps=3 format=3]
 
-[ext_resource type="Script" path="res://scripts/soldier.gd" id="1_sl123"]
+[ext_resource type="Script" path="res://scripts/soldier.gd" id="1_soldier"]
 
-[sub_resource type="CircleShape2D" id="CircleShape2D_sl"]
-radius = 12.0
+[sub_resource type="CircleShape2D" id="CircleShape2D_soldier"]
+radius = 13.0
 
 [node name="Soldier" type="CharacterBody2D" groups=["units", "soldiers"]]
-script = ExtResource("1_sl123")
+script = ExtResource("1_soldier")
 
 [node name="Sprite2D" type="ColorRect" parent="."]
-offset_left = -10.0
-offset_top = -10.0
-offset_right = 10.0
-offset_bottom = 10.0
-color = Color(0.8, 0.2, 0.2, 1)
+offset_left = -11.0
+offset_top = -11.0
+offset_right = 11.0
+offset_bottom = 11.0
+color = Color(0.78, 0.18, 0.18, 1)
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
-shape = SubResource("CircleShape2D_sl")
+shape = SubResource("CircleShape2D_soldier")
 
 [node name="SelectionRing" type="ColorRect" parent="."]
 visible = false
-offset_left = -14.0
-offset_top = -14.0
-offset_right = 14.0
-offset_bottom = 14.0
-color = Color(0, 1, 0, 0.6)
+offset_left = -15.0
+offset_top = -15.0
+offset_right = 15.0
+offset_bottom = 15.0
+color = Color(0, 1, 0, 0.55)
 
 [node name="HealthBar" type="ProgressBar" parent="."]
-offset_left = -15.0
-offset_top = -22.0
-offset_right = 15.0
-offset_bottom = -16.0
+offset_left = -16.0
+offset_top = -25.0
+offset_right = 16.0
+offset_bottom = -19.0
+show_percentage = false
 value = 100.0
 
-[connection signal="input_event" from="." to="." method="_on_input_event"]

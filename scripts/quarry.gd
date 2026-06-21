@@ -1,11 +1,10 @@
-class_name Farm
+class_name Quarry
 extends ResourceBuilding
 
 
 func _ready() -> void:
-	resource_group = "farms"
+	resource_group = "quarries"
 	max_workers = 3
-	base_production_rate = 1.4
+	base_production_rate = 0.9
 	max_stockpile = 60
 	super._ready()
-	add_to_group("food_sources")

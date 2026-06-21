@@ -1,157 +1,326 @@
-[gd_scene format=3 uid="uid://vbvt68g1cwyf"]
+[gd_scene load_steps=10 format=3]
 
-[ext_resource type="Script" uid="uid://bm6hswb5o3att" path="res://scripts/main.gd" id="1_abc12"]
-[ext_resource type="Script" uid="uid://br1f8mq7tjqk3" path="res://scripts/camera_controller.gd" id="2_def34"]
-[ext_resource type="PackedScene" path="res://scenes/village_center.tscn" id="3_ghi56"]
-[ext_resource type="PackedScene" path="res://scenes/tree.tscn" id="4_jkl78"]
-[ext_resource type="Script" uid="uid://ryj3wh71g50v" path="res://scripts/ui_controller.gd" id="5_mno90"]
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/camera_controller.gd" id="2_cam"]
+[ext_resource type="PackedScene" path="res://scenes/village_center.tscn" id="3_vc"]
+[ext_resource type="PackedScene" path="res://scenes/house.tscn" id="4_house"]
+[ext_resource type="PackedScene" path="res://scenes/tree.tscn" id="5_tree"]
+[ext_resource type="Script" path="res://scripts/ui_controller.gd" id="6_ui"]
+[ext_resource type="PackedScene" path="res://scenes/citizen.tscn" id="7_citizen"]
 
-[node name="Main" type="Node2D" unique_id=283995517]
-script = ExtResource("1_abc12")
+[node name="Main" type="Node2D"]
+script = ExtResource("1_main")
 
-[node name="Camera" type="Camera2D" parent="." unique_id=2120434238]
-position = Vector2(576, 324)
-script = ExtResource("2_def34")
+[node name="Camera" type="Camera2D" parent="."]
+position = Vector2(640, 360)
+script = ExtResource("2_cam")
 
-[node name="SelectionBox" type="ColorRect" parent="Camera" unique_id=2060490468]
+[node name="SelectionBox" type="ColorRect" parent="Camera"]
 visible = false
 offset_right = 40.0
 offset_bottom = 40.0
-color = Color(0, 0.588235, 1, 0.3)
+color = Color(0, 0.588235, 1, 0.28)
 
-[node name="PlacementGhost" type="ColorRect" parent="Camera" unique_id=917716791]
+[node name="PlacementGhost" type="ColorRect" parent="Camera"]
 visible = false
 offset_right = 60.0
 offset_bottom = 60.0
 color = Color(0.9, 0.8, 0.3, 0.5)
 
-[node name="Ground" type="ColorRect" parent="." unique_id=1816744590]
-offset_right = 2000.0
-offset_bottom = 2000.0
-color = Color(0.2, 0.45, 0.15, 1)
+[node name="Ground" type="ColorRect" parent="."]
+offset_right = 3200.0
+offset_bottom = 3200.0
+color = Color(0.26, 0.5, 0.2, 1)
 
-[node name="VillageCenter" parent="." unique_id=1962584484 instance=ExtResource("3_ghi56")]
-position = Vector2(576, 324)
+[node name="Buildings" type="Node2D" parent="."]
 
-[node name="Trees" type="Node2D" parent="." unique_id=457175354]
+[node name="VillageCenter" parent="Buildings" instance=ExtResource("3_vc")]
+position = Vector2(640, 360)
 
-[node name="ResourceTree" parent="Trees" unique_id=245657068 instance=ExtResource("4_jkl78")]
-position = Vector2(200, 200)
+[node name="House" parent="Buildings" instance=ExtResource("4_house")]
+position = Vector2(520, 460)
+build_progress = 6.0
 
-[node name="ResourceTree2" parent="Trees" unique_id=75272170 instance=ExtResource("4_jkl78")]
-position = Vector2(350, 150)
+[node name="Resources" type="Node2D" parent="."]
 
-[node name="ResourceTree3" parent="Trees" unique_id=444643505 instance=ExtResource("4_jkl78")]
-position = Vector2(150, 400)
+[node name="Tree1" parent="Resources" instance=ExtResource("5_tree")]
+position = Vector2(220, 220)
 
-[node name="ResourceTree4" parent="Trees" unique_id=2112961352 instance=ExtResource("4_jkl78")]
-position = Vector2(900, 250)
+[node name="Tree2" parent="Resources" instance=ExtResource("5_tree")]
+position = Vector2(380, 160)
 
-[node name="ResourceTree5" parent="Trees" unique_id=74817501 instance=ExtResource("4_jkl78")]
-position = Vector2(800, 500)
+[node name="Tree3" parent="Resources" instance=ExtResource("5_tree")]
+position = Vector2(160, 440)
 
-[node name="ResourceTree6" parent="Trees" unique_id=2127429017 instance=ExtResource("4_jkl78")]
-position = Vector2(1100, 400)
+[node name="Tree4" parent="Resources" instance=ExtResource("5_tree")]
+position = Vector2(980, 260)
 
-[node name="UI" type="CanvasLayer" parent="." unique_id=514216689]
-script = ExtResource("5_mno90")
+[node name="Tree5" parent="Resources" instance=ExtResource("5_tree")]
+position = Vector2(880, 540)
 
-[node name="Resources" type="VBoxContainer" parent="UI" unique_id=737449417]
-offset_left = 20.0
-offset_top = 20.0
-offset_right = 200.0
-offset_bottom = 120.0
+[node name="Tree6" parent="Resources" instance=ExtResource("5_tree")]
+position = Vector2(1180, 420)
 
-[node name="FoodLabel" type="Label" parent="UI/Resources" unique_id=1416840782]
+[node name="Tree7" parent="Resources" instance=ExtResource("5_tree")]
+position = Vector2(420, 640)
+
+[node name="Tree8" parent="Resources" instance=ExtResource("5_tree")]
+position = Vector2(760, 160)
+
+[node name="Units" type="Node2D" parent="."]
+
+[node name="Citizen1" parent="Units" instance=ExtResource("7_citizen")]
+position = Vector2(590, 420)
+
+[node name="Citizen2" parent="Units" instance=ExtResource("7_citizen")]
+position = Vector2(680, 420)
+
+[node name="Citizen3" parent="Units" instance=ExtResource("7_citizen")]
+position = Vector2(640, 460)
+
+[node name="Citizen4" parent="Units" instance=ExtResource("7_citizen")]
+position = Vector2(560, 320)
+
+[node name="Citizen5" parent="Units" instance=ExtResource("7_citizen")]
+position = Vector2(720, 320)
+
+[node name="UI" type="CanvasLayer" parent="."]
+script = ExtResource("6_ui")
+
+[node name="TopBar" type="Panel" parent="UI"]
+anchors_preset = 0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 560.0
+offset_bottom = 56.0
+
+[node name="Resources" type="HBoxContainer" parent="UI/TopBar"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 12.0
+offset_top = 6.0
+offset_right = -12.0
+offset_bottom = -6.0
+theme_override_constants/separation = 14
+
+[node name="FoodLabel" type="Label" parent="UI/TopBar/Resources"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 20
-text = "Food: 200"
+theme_override_font_sizes/font_size = 16
+text = "Food: 250"
 
-[node name="WoodLabel" type="Label" parent="UI/Resources" unique_id=529050445]
+[node name="WoodLabel" type="Label" parent="UI/TopBar/Resources"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 20
-text = "Wood: 150"
+theme_override_font_sizes/font_size = 16
+text = "Wood: 200"
 
-[node name="PopLabel" type="Label" parent="UI/Resources" unique_id=1465395261]
+[node name="StoneLabel" type="Label" parent="UI/TopBar/Resources"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 20
-text = "Pop: 0/10"
+theme_override_font_sizes/font_size = 16
+text = "Stone: 100"
 
-[node name="UnitPanel" type="Panel" parent="UI" unique_id=2042426658]
-visible = false
-offset_left = 20.0
-offset_top = 470.0
-offset_right = 300.0
-offset_bottom = 620.0
+[node name="GoldLabel" type="Label" parent="UI/TopBar/Resources"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Gold: 50"
 
-[node name="UnitName" type="Label" parent="UI/UnitPanel" unique_id=1920443941]
-layout_mode = 0
+[node name="PopLabel" type="Label" parent="UI/TopBar/Resources"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Pop: 5 / 5"
+
+[node name="TimePanel" type="Panel" parent="UI"]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -200.0
+offset_top = 16.0
+offset_right = -16.0
+offset_bottom = 92.0
+grow_horizontal = 0
+
+[node name="TimeLabel" type="Label" parent="UI/TimePanel"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
 offset_left = 10.0
-offset_top = 10.0
-offset_right = 270.0
-offset_bottom = 40.0
+offset_top = 6.0
+offset_right = -10.0
+offset_bottom = 28.0
 theme_override_font_sizes/font_size = 18
-text = "Unit Selected"
+text = "Year 1"
+horizontal_alignment = 1
 
-[node name="BuildFarmsteadButton" type="Button" parent="UI/UnitPanel" unique_id=1159279488]
-layout_mode = 0
+[node name="SeasonLabel" type="Label" parent="UI/TimePanel"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
 offset_left = 10.0
-offset_top = 50.0
-offset_right = 270.0
-offset_bottom = 85.0
-text = "Build Farmstead (75 Wood)"
-
-[node name="UnitHint" type="Label" parent="UI/UnitPanel" unique_id=827883916]
-layout_mode = 0
-offset_left = 10.0
-offset_top = 95.0
-offset_right = 270.0
-offset_bottom = 140.0
-theme_override_font_sizes/font_size = 13
-text = "Right-click a tree to chop wood, or a farmstead to harvest food."
-autowrap_mode = 2
-
-[node name="BuildingPanel" type="Panel" parent="UI" unique_id=2125080782]
-visible = false
-offset_left = 20.0
-offset_top = 470.0
-offset_right = 300.0
-offset_bottom = 620.0
-
-[node name="BuildingName" type="Label" parent="UI/BuildingPanel" unique_id=2110333398]
-layout_mode = 0
-offset_left = 10.0
-offset_top = 10.0
-offset_right = 270.0
-offset_bottom = 40.0
-theme_override_font_sizes/font_size = 18
-text = "Village Center"
-
-[node name="SpawnWorkerButton" type="Button" parent="UI/BuildingPanel" unique_id=1993436036]
-layout_mode = 0
-offset_left = 10.0
-offset_top = 50.0
-offset_right = 270.0
-offset_bottom = 85.0
-text = "Spawn Worker (50 Food)"
-
-[node name="SpawnSoldierButton" type="Button" parent="UI/BuildingPanel" unique_id=767506073]
-layout_mode = 0
-offset_left = 10.0
-offset_top = 95.0
-offset_right = 270.0
-offset_bottom = 130.0
-text = "Spawn Soldier (75F, 25W)"
-
-[node name="QueueLabel" type="Label" parent="UI/BuildingPanel" unique_id=1978741736]
-layout_mode = 0
-offset_left = 10.0
-offset_top = 140.0
-offset_right = 270.0
-offset_bottom = 165.0
+offset_top = 30.0
+offset_right = -10.0
+offset_bottom = 48.0
 theme_override_font_sizes/font_size = 14
-text = "Queue: empty"
+text = "Spring"
+horizontal_alignment = 1
 
-[connection signal="pressed" from="UI/UnitPanel/BuildFarmsteadButton" to="UI" method="_on_build_farmstead_pressed"]
-[connection signal="pressed" from="UI/BuildingPanel/SpawnWorkerButton" to="UI" method="_on_spawn_worker_pressed"]
-[connection signal="pressed" from="UI/BuildingPanel/SpawnSoldierButton" to="UI" method="_on_spawn_soldier_pressed"]
+[node name="PopBreakdown" type="Label" parent="UI/TimePanel"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 10.0
+offset_top = 50.0
+offset_right = -10.0
+offset_bottom = 72.0
+theme_override_font_sizes/font_size = 10
+text = "Children: 0   Adults: 5   Elders: 0   Soldiers: 0"
+autowrap_mode = 2
+horizontal_alignment = 1
+
+[node name="SelectionPanel" type="Panel" parent="UI"]
+visible = false
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = -260.0
+offset_right = 360.0
+offset_bottom = -116.0
+grow_vertical = 0
+
+[node name="Title" type="Label" parent="UI/SelectionPanel"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 10.0
+offset_top = 8.0
+offset_right = -10.0
+offset_bottom = 30.0
+theme_override_font_sizes/font_size = 16
+text = "Selection"
+
+[node name="Info" type="Label" parent="UI/SelectionPanel"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 10.0
+offset_top = 34.0
+offset_right = -10.0
+offset_bottom = 90.0
+theme_override_font_sizes/font_size = 13
+autowrap_mode = 2
+text = ""
+
+[node name="Hint" type="Label" parent="UI/SelectionPanel"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 10.0
+offset_top = 94.0
+offset_right = -10.0
+offset_bottom = 130.0
+theme_override_font_sizes/font_size = 11
+autowrap_mode = 2
+text = ""
+
+[node name="VillageActions" type="VBoxContainer" parent="UI/SelectionPanel"]
+visible = false
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 10.0
+offset_top = 96.0
+offset_right = -10.0
+offset_bottom = 136.0
+
+[node name="RecruitCitizenButton" type="Button" parent="UI/SelectionPanel/VillageActions"]
+layout_mode = 2
+text = "Recruit Citizen (40 Food)"
+
+[node name="BarracksActions" type="VBoxContainer" parent="UI/SelectionPanel"]
+visible = false
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 10.0
+offset_top = 96.0
+offset_right = -10.0
+offset_bottom = 136.0
+
+[node name="TrainSoldierButton" type="Button" parent="UI/SelectionPanel/BarracksActions"]
+layout_mode = 2
+text = "Train Soldier (60 Food, 10 Gold)"
+
+[node name="BuildMenu" type="Panel" parent="UI"]
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -360.0
+offset_top = -76.0
+offset_right = 360.0
+offset_bottom = -16.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="HouseButton" type="Button" parent="UI/BuildMenu"]
+layout_mode = 0
+offset_left = 10.0
+offset_top = 8.0
+offset_right = 140.0
+offset_bottom = 52.0
+text = "House
+40W 10S"
+
+[node name="FarmButton" type="Button" parent="UI/BuildMenu"]
+layout_mode = 0
+offset_left = 148.0
+offset_top = 8.0
+offset_right = 278.0
+offset_bottom = 52.0
+text = "Farm
+50W"
+
+[node name="LumberButton" type="Button" parent="UI/BuildMenu"]
+layout_mode = 0
+offset_left = 286.0
+offset_top = 8.0
+offset_right = 416.0
+offset_bottom = 52.0
+text = "Lumber Camp
+30W 10S"
+
+[node name="QuarryButton" type="Button" parent="UI/BuildMenu"]
+layout_mode = 0
+offset_left = 424.0
+offset_top = 8.0
+offset_right = 554.0
+offset_bottom = 52.0
+text = "Quarry
+40W"
+
+[node name="BarracksButton" type="Button" parent="UI/BuildMenu"]
+layout_mode = 0
+offset_left = 562.0
+offset_top = 8.0
+offset_right = 692.0
+offset_bottom = 52.0
+text = "Barracks
+80W 40S"
+
+[node name="NotificationLabel" type="Label" parent="UI"]
+visible = false
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = -104.0
+offset_right = -16.0
+offset_bottom = -80.0
+grow_vertical = 0
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(1, 0.85, 0.3, 1)
+horizontal_alignment = 1
+text = ""

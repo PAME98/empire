@@ -1,0 +1,45 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/quarry.gd" id="1_q"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_q"]
+size = Vector2(58, 58)
+
+[node name="Quarry" type="StaticBody2D" groups=["buildings", "quarries"]]
+script = ExtResource("1_q")
+build_time = 7.0
+
+[node name="FinishedSprite" type="ColorRect" parent="."]
+offset_left = -29.0
+offset_top = -29.0
+offset_right = 29.0
+offset_bottom = 29.0
+color = Color(0.55, 0.55, 0.6, 1)
+
+[node name="ConstructionSprite" type="ColorRect" parent="."]
+visible = false
+offset_left = -29.0
+offset_top = -29.0
+offset_right = 29.0
+offset_bottom = 29.0
+color = Color(0.55, 0.55, 0.6, 0.45)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_q")
+
+[node name="SelectionRing" type="ColorRect" parent="."]
+visible = false
+offset_left = -34.0
+offset_top = -34.0
+offset_right = 34.0
+offset_bottom = 34.0
+color = Color(0, 1, 0, 0.5)
+
+[node name="HealthBar" type="ProgressBar" parent="."]
+offset_left = -29.0
+offset_top = -42.0
+offset_right = 29.0
+offset_bottom = -36.0
+show_percentage = false
+value = 100.0
+

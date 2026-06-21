@@ -1,38 +1,103 @@
 class_name Soldier
 extends Unit
 
-@export var attack_damage: int = 15
-@export var attack_range: float = 40.0
+## Military unit. Always under direct RTS control when selected — no economy
+## behaviour. Right-click an enemy to attack, right-click ground to move.
+## Idle soldiers (no order) will engage nearby enemies on their own so a
+## standing army actually defends itself, but never wander off to gather or
+## build — that ambiguity was part of what broke the old prototype.
+
+@export var attack_damage: int = 14
+@export var attack_range: float = 46.0
 @export var attack_cooldown: float = 1.0
+@export var aggro_range: float = 220.0
 
-var target_enemy = null
-var attack_timer: float = 0.0
+var attack_target = null
+var has_player_order: bool = false
+var _attack_timer: float = 0.0
 
-func _process(_delta):
-	if target_enemy and is_instance_valid(target_enemy):
-		var dist = global_position.distance_to(target_enemy.global_position)
+@onready var sprite: Node = get_node_or_null("Sprite2D")
 
-		if dist <= attack_range:
-			is_moving = false
-			attack_timer += _delta
-			if attack_timer >= attack_cooldown:
-				attack_timer = 0
-				_attack()
-		else:
-			move_to(target_enemy.global_position)
+
+func _ready() -> void:
+	super._ready()
+	add_to_group("soldiers")
+	speed = 95.0
+	max_health = 150
+	health = max_health
+
+
+func _process(delta: float) -> void:
+	if not is_alive:
+		return
+
+	if _has_valid_attack_target():
+		_pursue_and_attack(delta)
+	elif not has_player_order:
+		_look_for_nearby_enemy()
+
+
+func _has_valid_attack_target() -> bool:
+	if not is_instance_valid(attack_target):
+		return false
+	if "is_alive" in attack_target and not attack_target.is_alive:
+		return false
+	return true
+
+
+func _pursue_and_attack(delta: float) -> void:
+	var dist = global_position.distance_to(attack_target.global_position)
+	if dist <= attack_range:
+		stop()
+		_attack_timer += delta
+		if _attack_timer >= attack_cooldown:
+			_attack_timer = 0.0
+			if attack_target.has_method("take_damage"):
+				attack_target.take_damage(attack_damage, self)
 	else:
-		target_enemy = null
+		move_to(attack_target.global_position)
 
-func _attack():
-	if target_enemy and target_enemy.has_method("take_damage"):
-		target_enemy.take_damage(attack_damage)
 
-func assign_attack_target(enemy):
-	target_enemy = enemy
+func _look_for_nearby_enemy() -> void:
+	var nearest = null
+	var nearest_dist = aggro_range
+	for enemy in get_tree().get_nodes_in_group("enemies"):
+		if is_instance_valid(enemy):
+			var d = global_position.distance_to(enemy.global_position)
+			if d < nearest_dist:
+				nearest_dist = d
+				nearest = enemy
+	if nearest:
+		attack_target = nearest
 
-func command_move(pos: Vector2):
-	target_enemy = null
+
+# ---------------------------------------------------------------------------
+# RTS commands
+# ---------------------------------------------------------------------------
+func command_move(pos: Vector2) -> void:
+	has_player_order = true
+	attack_target = null
 	move_to(pos)
 
-func _on_input_event(_viewport, event, _shape_idx):
-	super._on_input_event(_viewport, event, _shape_idx)
+
+func command_attack(target) -> void:
+	has_player_order = true
+	attack_target = target
+
+
+func stop_special_orders() -> void:
+	has_player_order = false
+	attack_target = null
+
+
+func _on_reached_target() -> void:
+	has_player_order = false
+
+
+func die(cause: String = "unknown") -> void:
+	if not is_alive:
+		return
+	is_alive = false
+	GameManager.remove_population(self, cause)
+	died.emit(self)
+	queue_free()

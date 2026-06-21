@@ -1,86 +1,79 @@
 class_name VillageCenter
 extends Building
 
-@export var spawn_offset: Vector2 = Vector2(0, 80)
-@export var worker_recruit_time: float = 4.0
-@export var soldier_recruit_time: float = 6.0
+## The starting hub: drop-off point for all gathered resources (citizens path
+## here automatically) and where new citizens are recruited. Always starts
+## already-built so a fresh game has somewhere to deliver to immediately.
 
-@onready var recruit_bar: ProgressBar = $RecruitBar
+@export var spawn_offset: Vector2 = Vector2(0, 86)
+@export var recruit_time: float = 5.0
 
-# Each entry: {"type": "worker"|"soldier", "duration": float}
-var recruit_queue: Array = []
+var recruit_queue: Array = []  # [{type, duration}]
 var recruit_elapsed: float = 0.0
 var is_recruiting: bool = false
 
-func _ready():
+@onready var recruit_bar: ProgressBar = get_node_or_null("RecruitBar")
+
+
+func _ready() -> void:
 	super._ready()
 	add_to_group("village_centers")
-	# A Village Center placed directly in a scene is already built.
 	if not is_constructed:
 		finish_building()
 	if recruit_bar:
 		recruit_bar.visible = false
-		recruit_bar.value = 0
 
-func _process(delta):
-	if not is_recruiting:
+
+func _process(delta: float) -> void:
+	super._process(delta)
+
+	if not is_recruiting or recruit_queue.is_empty():
 		return
 
 	recruit_elapsed += delta
 	var current = recruit_queue[0]
-	recruit_bar.value = clamp(recruit_elapsed / current["duration"] * 100.0, 0, 100)
+	if recruit_bar:
+		recruit_bar.value = clampf(recruit_elapsed / current["duration"] * 100.0, 0.0, 100.0)
 
 	if recruit_elapsed >= current["duration"]:
-		_complete_recruit(current["type"])
+		_complete_recruit()
 		recruit_queue.pop_front()
 		recruit_elapsed = 0.0
 		_start_next_recruit()
 
-func spawn_worker() -> bool:
-	return _queue_recruit("worker", GameManager.WORKER_COST, worker_recruit_time)
 
-func spawn_soldier() -> bool:
-	return _queue_recruit("soldier", GameManager.SOLDIER_COST, soldier_recruit_time)
-
-func _queue_recruit(unit_type: String, cost: Dictionary, duration: float) -> bool:
-	if GameManager.population + recruit_queue.size() >= GameManager.max_population:
+func queue_citizen() -> bool:
+	var cost = {"food": 40}
+	if GameManager.population >= GameManager.housing_capacity:
+		GameManager.notify("Need more housing before recruiting.")
 		return false
 	if not GameManager.can_afford(cost):
+		GameManager.notify("Not enough food to recruit a citizen.")
 		return false
-
-	GameManager.spend_resources(cost)
-	recruit_queue.append({"type": unit_type, "duration": duration})
-
+	GameManager.spend(cost)
+	recruit_queue.append({"type": "citizen", "duration": recruit_time})
 	if not is_recruiting:
 		_start_next_recruit()
-
 	return true
 
-func _start_next_recruit():
+
+func _start_next_recruit() -> void:
 	if recruit_queue.is_empty():
 		is_recruiting = false
 		if recruit_bar:
 			recruit_bar.visible = false
 		return
-
 	is_recruiting = true
 	recruit_elapsed = 0.0
 	if recruit_bar:
 		recruit_bar.visible = true
-		recruit_bar.value = 0
+		recruit_bar.value = 0.0
 
-func _complete_recruit(unit_type: String):
-	GameManager.add_population()
 
-	var unit
-	if unit_type == "worker":
-		unit = preload("res://scenes/worker.tscn").instantiate()
-	else:
-		unit = preload("res://scenes/soldier.tscn").instantiate()
-
-	unit.global_position = global_position + spawn_offset
-	unit.team = team
-	get_tree().current_scene.add_child(unit)
-
-	GameManager.clear_selection()
-	GameManager.select_unit(unit)
+func _complete_recruit() -> void:
+	var citizen = preload("res://scenes/citizen.tscn").instantiate()
+	citizen.global_position = global_position + spawn_offset + Vector2(randf_range(-18, 18), randf_range(-18, 18))
+	citizen.team = team
+	get_tree().current_scene.get_node("Units").add_child(citizen)
+	citizen.setup_as_adult()
+	GameManager.register_population(citizen)

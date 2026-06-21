@@ -1,94 +1,281 @@
 extends CanvasLayer
 
-@onready var food_label = $Resources/FoodLabel
-@onready var wood_label = $Resources/WoodLabel
-@onready var pop_label = $Resources/PopLabel
-@onready var unit_panel = $UnitPanel
-@onready var building_panel = $BuildingPanel
-@onready var queue_label = $BuildingPanel/QueueLabel
-@onready var unit_name_label = $UnitPanel/UnitName
-@onready var unit_hint_label = $UnitPanel/UnitHint
-@onready var build_farmstead_button = $UnitPanel/BuildFarmsteadButton
+## Wires GameManager signals to on-screen labels/panels and routes button
+## presses back into GameManager / the selected building.
 
-func _ready():
+@onready var food_label: Label = $TopBar/Resources/FoodLabel
+@onready var wood_label: Label = $TopBar/Resources/WoodLabel
+@onready var stone_label: Label = $TopBar/Resources/StoneLabel
+@onready var gold_label: Label = $TopBar/Resources/GoldLabel
+@onready var pop_label: Label = $TopBar/Resources/PopLabel
+
+@onready var time_label: Label = $TimePanel/TimeLabel
+@onready var season_label: Label = $TimePanel/SeasonLabel
+@onready var pop_breakdown_label: Label = $TimePanel/PopBreakdown
+
+@onready var selection_panel: Panel = $SelectionPanel
+@onready var selection_title: Label = $SelectionPanel/Title
+@onready var selection_info: Label = $SelectionPanel/Info
+@onready var selection_hint: Label = $SelectionPanel/Hint
+
+@onready var build_menu: Panel = $BuildMenu
+@onready var build_house_btn: Button = $BuildMenu/HouseButton
+@onready var build_farm_btn: Button = $BuildMenu/FarmButton
+@onready var build_lumber_btn: Button = $BuildMenu/LumberButton
+@onready var build_quarry_btn: Button = $BuildMenu/QuarryButton
+@onready var build_barracks_btn: Button = $BuildMenu/BarracksButton
+
+@onready var village_actions: VBoxContainer = $SelectionPanel/VillageActions
+@onready var recruit_citizen_btn: Button = $SelectionPanel/VillageActions/RecruitCitizenButton
+
+@onready var barracks_actions: VBoxContainer = $SelectionPanel/BarracksActions
+@onready var train_soldier_btn: Button = $SelectionPanel/BarracksActions/TrainSoldierButton
+
+@onready var notification_label: Label = $NotificationLabel
+
+var _notification_timer: float = 0.0
+
+
+func _ready() -> void:
 	GameManager.resources_changed.connect(_on_resources_changed)
-	GameManager.unit_selected.connect(_on_unit_selected)
-	GameManager.building_selected.connect(_on_building_selected)
-	GameManager.selection_cleared.connect(_on_selection_cleared)
+	GameManager.time_changed.connect(_on_time_changed)
+	GameManager.selection_changed.connect(_on_selection_changed)
 	GameManager.placement_mode_changed.connect(_on_placement_mode_changed)
-	unit_panel.visible = false
-	building_panel.visible = false
+	GameManager.notification.connect(_on_notification)
 
-func _process(_delta):
-	if building_panel.visible:
-		_update_queue_label()
+	build_house_btn.pressed.connect(func(): _start_placement("house"))
+	build_farm_btn.pressed.connect(func(): _start_placement("farm"))
+	build_lumber_btn.pressed.connect(func(): _start_placement("lumber_camp"))
+	build_quarry_btn.pressed.connect(func(): _start_placement("quarry"))
+	build_barracks_btn.pressed.connect(func(): _start_placement("barracks"))
 
-func _update_queue_label():
-	var building = GameManager.selected_building
-	if building == null or not ("recruit_queue" in building):
-		queue_label.text = ""
-		return
+	recruit_citizen_btn.pressed.connect(_on_recruit_citizen_pressed)
+	train_soldier_btn.pressed.connect(_on_train_soldier_pressed)
 
-	if building.recruit_queue.is_empty():
-		queue_label.text = "Queue: empty"
-	else:
-		var current = building.recruit_queue[0]
-		var pct = int(clamp(building.recruit_elapsed / current["duration"] * 100.0, 0, 100))
-		var waiting = building.recruit_queue.size() - 1
-		var text = "Recruiting %s: %d%%" % [current["type"], pct]
-		if waiting > 0:
-			text += " (+%d queued)" % waiting
-		queue_label.text = text
+	selection_panel.visible = false
+	village_actions.visible = false
+	barracks_actions.visible = false
+	notification_label.visible = false
 
-func _on_resources_changed(food: int, wood: int, pop: int, max_pop: int):
+	GameManager.update_ui()
+
+
+func _process(delta: float) -> void:
+	if GameManager.selected_building != null and is_instance_valid(GameManager.selected_building):
+		_refresh_selected_building_info()
+
+	if GameManager.selected_resource_node != null:
+		if is_instance_valid(GameManager.selected_resource_node):
+			_show_resource_node_selection(GameManager.selected_resource_node)
+		else:
+			GameManager.clear_selection()
+
+	if notification_label.visible:
+		_notification_timer -= delta
+		if _notification_timer <= 0.0:
+			notification_label.visible = false
+
+
+func _on_resources_changed(food: int, wood: int, stone: int, gold: int, population: int, max_population: int) -> void:
 	food_label.text = "Food: %d" % food
 	wood_label.text = "Wood: %d" % wood
-	pop_label.text = "Pop: %d/%d" % [pop, max_pop]
+	stone_label.text = "Stone: %d" % stone
+	gold_label.text = "Gold: %d" % gold
+	pop_label.text = "Pop: %d / %d" % [population, max_population]
 
-func _on_unit_selected(unit):
-	unit_panel.visible = true
-	building_panel.visible = false
 
-	var is_worker = unit.is_in_group("workers")
-	build_farmstead_button.visible = is_worker
+func _on_time_changed(year: int, season: String, _progress: float) -> void:
+	time_label.text = "Year %d" % year
+	season_label.text = season
+	pop_breakdown_label.text = "Children: %d   Adults: %d   Elders: %d   Soldiers: %d" % [
+		GameManager.child_count, GameManager.adult_count, GameManager.elder_count, GameManager.all_soldiers.size()
+	]
 
-	if is_worker:
-		unit_name_label.text = "Worker Selected"
-		unit_hint_label.text = "Right-click a tree to chop wood, or a farmstead to harvest food."
+
+# ---------------------------------------------------------------------------
+# Selection panel
+# ---------------------------------------------------------------------------
+func _on_selection_changed(units: Array, building, resource_node) -> void:
+	village_actions.visible = false
+	barracks_actions.visible = false
+
+	if building != null:
+		selection_panel.visible = true
+		_show_building_selection(building)
+		return
+
+	if resource_node != null:
+		selection_panel.visible = true
+		_show_resource_node_selection(resource_node)
+		return
+
+	if units.is_empty():
+		selection_panel.visible = false
+		return
+
+	selection_panel.visible = true
+	if units.size() == 1:
+		_show_single_unit(units[0])
 	else:
-		unit_name_label.text = "Soldier Selected"
-		unit_hint_label.text = "Right-click an enemy to attack, or open ground to move."
+		selection_title.text = "%d units selected" % units.size()
+		selection_info.text = _group_summary(units)
+		selection_hint.text = "Right-click ground to move, a resource to gather, or a build site to help build."
 
-func _on_building_selected(_building):
-	unit_panel.visible = false
-	building_panel.visible = true
 
-func _on_selection_cleared():
-	unit_panel.visible = false
-	building_panel.visible = false
+func _show_resource_node_selection(resource_node) -> void:
+	var label = _resource_type_label(resource_node.resource_type)
+	selection_title.text = label
+	if resource_node.is_depleted():
+		selection_info.text = "Depleted — nothing left to gather here."
+	else:
+		selection_info.text = "%d / %d %s remaining" % [resource_node.amount, resource_node.max_amount, resource_node.resource_type]
+	selection_hint.text = "Select a citizen, then right-click this to start gathering it."
 
-func _on_spawn_worker_pressed():
-	if GameManager.selected_building and GameManager.selected_building.is_in_group("village_centers"):
-		GameManager.selected_building.spawn_worker()
 
-func _on_spawn_soldier_pressed():
-	if GameManager.selected_building and GameManager.selected_building.is_in_group("village_centers"):
-		GameManager.selected_building.spawn_soldier()
+func _resource_type_label(resource_type: String) -> String:
+	match resource_type:
+		"wood": return "Tree"
+		"stone": return "Stone Deposit"
+		"food": return "Berry Bush"
+	return "Resource"
 
-func _on_build_farmstead_pressed():
-	if GameManager.selected_units.is_empty():
+
+func _show_single_unit(unit) -> void:
+	if unit is Citizen:
+		selection_title.text = "%s (Age %d)" % [unit.life_stage_label(), unit.age]
+		selection_info.text = "Job: %s\nHealth: %d/%d\nCarrying: %d %s" % [
+			unit.job_label(), unit.health, unit.max_health, unit.carried_amount, unit.carried_resource
+		]
+		selection_hint.text = "Right-click: move / gather resource / help build."
+	elif unit is Soldier:
+		selection_title.text = "Soldier"
+		selection_info.text = "Health: %d/%d\nDamage: %d" % [unit.health, unit.max_health, unit.attack_damage]
+		selection_hint.text = "Right-click an enemy to attack, or ground to move."
+	else:
+		selection_title.text = "Unit"
+		selection_info.text = ""
+		selection_hint.text = ""
+
+
+func _group_summary(units: Array) -> String:
+	var citizens = 0
+	var soldiers = 0
+	for u in units:
+		if u is Citizen:
+			citizens += 1
+		elif u is Soldier:
+			soldiers += 1
+	var parts: Array[String] = []
+	if citizens > 0:
+		parts.append("%d citizens" % citizens)
+	if soldiers > 0:
+		parts.append("%d soldiers" % soldiers)
+	return ", ".join(parts)
+
+
+func _show_building_selection(building) -> void:
+	if building is VillageCenter:
+		selection_title.text = "Village Center"
+		village_actions.visible = true
+		_refresh_selected_building_info()
+	elif building is Barracks:
+		selection_title.text = "Barracks (%s)" % ("ready" if building.is_constructed else "under construction")
+		barracks_actions.visible = building.is_constructed
+		_refresh_selected_building_info()
+	elif building is House:
+		selection_title.text = "House"
+		selection_info.text = "Adds %d housing." % building.capacity
+		selection_hint.text = ""
+	elif building is Farm:
+		selection_title.text = "Farm"
+		_refresh_selected_building_info()
+	elif building is LumberCamp:
+		selection_title.text = "Lumber Camp"
+		_refresh_selected_building_info()
+	elif building is Quarry:
+		selection_title.text = "Quarry"
+		_refresh_selected_building_info()
+	else:
+		selection_title.text = "Building"
+		selection_info.text = ""
+		selection_hint.text = ""
+
+
+func _refresh_selected_building_info() -> void:
+	var building = GameManager.selected_building
+	if building == null:
 		return
 
-	var worker = GameManager.selected_units[0]
-	if not worker.is_in_group("workers"):
-		return
+	if building is VillageCenter:
+		if building.is_recruiting:
+			var current = building.recruit_queue[0]
+			var pct = int(clampf(building.recruit_elapsed / current["duration"] * 100.0, 0.0, 100.0))
+			selection_info.text = "Training citizen: %d%%\nQueued: %d" % [pct, building.recruit_queue.size() - 1]
+		else:
+			selection_info.text = "Idle — recruit a new citizen."
+		selection_hint.text = "Costs 40 food, needs free housing."
 
-	if not GameManager.can_afford(GameManager.FARM_COST):
-		unit_hint_label.text = "Not enough wood for a Farmstead (need 75)."
-		return
+	elif building is Barracks:
+		if not building.is_constructed:
+			selection_info.text = "Construction: %d%%" % int(clampf(building.build_progress / building.build_time * 100.0, 0.0, 100.0))
+		elif building.is_training:
+			var pct = int(clampf(building.train_elapsed / GameManager.BUILD_TIMES.get("soldier", 8.0) * 100.0, 0.0, 100.0))
+			selection_info.text = "Training soldier: %d%%\nQueued: %d" % [pct, building.train_queue.size() - 1]
+		else:
+			selection_info.text = "Idle — train a soldier."
+		var soldier_cost = GameManager.COSTS.get("soldier", {})
+		selection_hint.text = "Costs %d food, %d gold." % [soldier_cost.get("food", 0), soldier_cost.get("gold", 0)]
 
-	GameManager.start_building_placement("farmstead", worker)
+	elif building is ResourceBuilding:
+		var status = "under construction" if not building.is_constructed else "%d/%d workers, stockpile %d" % [
+			building.worker_count(), building.max_workers, int(building.stockpile)
+		]
+		selection_info.text = status
+		selection_hint.text = "Right-click while a citizen is selected to assign them here."
 
-func _on_placement_mode_changed(active: bool, _building_type: String):
+
+func _on_recruit_citizen_pressed() -> void:
+	if GameManager.selected_building is VillageCenter:
+		GameManager.selected_building.queue_citizen()
+
+
+func _on_train_soldier_pressed() -> void:
+	if GameManager.selected_building is Barracks:
+		GameManager.selected_building.queue_soldier()
+
+
+# ---------------------------------------------------------------------------
+# Build menu
+# ---------------------------------------------------------------------------
+func _start_placement(building_id: String) -> void:
+	var builder = null
+	if GameManager.selected_units.size() == 1 and GameManager.selected_units[0] is Citizen:
+		builder = GameManager.selected_units[0]
+	GameManager.start_building_placement(building_id, builder)
+
+
+func _on_placement_mode_changed(active: bool, building_id: String) -> void:
+	build_house_btn.disabled = active
+	build_farm_btn.disabled = active
+	build_lumber_btn.disabled = active
+	build_quarry_btn.disabled = active
+	build_barracks_btn.disabled = active
 	if active:
-		unit_hint_label.text = "Click on the ground to place the Farmstead (right-click to cancel)."
+		var cost = GameManager.COSTS.get(building_id, {})
+		_on_notification("Placing %s — click to confirm, right-click/Esc to cancel. Cost: %s" % [building_id, _format_cost(cost)])
+
+
+func _format_cost(cost: Dictionary) -> String:
+	var parts: Array[String] = []
+	for key in cost:
+		parts.append("%d %s" % [cost[key], key])
+	return ", ".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Notifications
+# ---------------------------------------------------------------------------
+func _on_notification(text: String) -> void:
+	notification_label.text = text
+	notification_label.visible = true
+	_notification_timer = 3.0
