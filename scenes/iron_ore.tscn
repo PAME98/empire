@@ -1,0 +1,22 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/resource_node.gd" id="1_node"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_i"]
+size = Vector2(48, 40)
+
+[node name="ResourceNode" type="StaticBody2D" groups=["resources", "iron_sources", "iron_deposits"]]
+script = ExtResource("1_node")
+resource_type = "iron"
+amount = 300
+resource_group = "iron_sources"
+
+[node name="Sprite2D" type="ColorRect" parent="."]
+offset_left = -24.0
+offset_top = -20.0
+offset_right = 24.0
+offset_bottom = 20.0
+color = Color(0.55, 0.42, 0.3, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_i")

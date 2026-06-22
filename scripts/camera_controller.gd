@@ -16,6 +16,7 @@ var drag_start: Vector2 = Vector2.ZERO
 
 @onready var selection_box: ColorRect = $SelectionBox
 @onready var placement_ghost: ColorRect = $PlacementGhost
+@onready var attack_area_ghost: AttackAreaIndicator = $AttackAreaGhost
 
 const BUILDING_SCENES := {
 	"house": "res://scenes/house.tscn",
@@ -29,7 +30,9 @@ const BUILDING_SCENES := {
 func _ready() -> void:
 	selection_box.visible = false
 	placement_ghost.visible = false
+	attack_area_ghost.visible = false
 	GameManager.placement_mode_changed.connect(_on_placement_mode_changed)
+	GameManager.attack_targeting_mode_changed.connect(_on_attack_targeting_mode_changed)
 
 
 func _process(delta: float) -> void:
@@ -42,10 +45,21 @@ func _process(delta: float) -> void:
 	if GameManager.is_placing_building and placement_ghost.visible:
 		placement_ghost.global_position = get_global_mouse_position() - placement_ghost.size * 0.5
 
+	if GameManager.is_targeting_attack_position and attack_area_ghost.visible:
+		attack_area_ghost.global_position = get_global_mouse_position()
+
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and event.keycode == KEY_T:
+		_toggle_attack_targeting()
+		return
+
 	if GameManager.is_placing_building:
 		_handle_placement_input(event)
+		return
+
+	if GameManager.is_targeting_attack_position:
+		_handle_attack_targeting_input(event)
 		return
 
 	if event is InputEventMouseButton:
@@ -296,6 +310,57 @@ func _confirm_placement() -> void:
 func _on_placement_mode_changed(active: bool, _building_id: String) -> void:
 	placement_ghost.visible = active
 	if active:
+		is_dragging = false
+		selection_box.visible = false
+
+
+# ---------------------------------------------------------------------------
+# Artillery attack-position targeting (T then left-click an area)
+# ---------------------------------------------------------------------------
+func _toggle_attack_targeting() -> void:
+	if GameManager.is_placing_building:
+		return
+
+	if GameManager.is_targeting_attack_position:
+		GameManager.cancel_attack_position_targeting()
+		return
+
+	var radius := 0.0
+	var any_artillery := false
+	for unit in GameManager.selected_units:
+		if is_instance_valid(unit) and unit.is_alive and unit is Artillery:
+			any_artillery = true
+			radius = maxf(radius, unit.splash_radius)
+
+	if any_artillery:
+		GameManager.start_attack_position_targeting(radius)
+	else:
+		GameManager.notify("Select an artillery unit to give it an attack-position order.")
+
+
+func _handle_attack_targeting_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_LEFT and not _is_over_ui(event.position):
+			_confirm_attack_position()
+		elif event.button_index == MOUSE_BUTTON_RIGHT:
+			GameManager.cancel_attack_position_targeting()
+	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		GameManager.cancel_attack_position_targeting()
+
+
+func _confirm_attack_position() -> void:
+	var pos = get_global_mouse_position()
+	for unit in GameManager.selected_units:
+		if is_instance_valid(unit) and unit.is_alive and unit is Artillery:
+			unit.command_attack_position(pos)
+	GameManager.cancel_attack_position_targeting()
+
+
+func _on_attack_targeting_mode_changed(active: bool, radius: float) -> void:
+	attack_area_ghost.visible = active
+	if active:
+		attack_area_ghost.set_mode("targeting")
+		attack_area_ghost.set_radius(radius)
 		is_dragging = false
 		selection_box.visible = false
 

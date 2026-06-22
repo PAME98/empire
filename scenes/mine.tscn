@@ -1,0 +1,44 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/mine.gd" id="1_mine"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_mine"]
+size = Vector2(58, 58)
+
+[node name="Mine" type="StaticBody2D" groups=["buildings", "mines"]]
+script = ExtResource("1_mine")
+build_time = 8.0
+
+[node name="FinishedSprite" type="ColorRect" parent="."]
+offset_left = -29.0
+offset_top = -29.0
+offset_right = 29.0
+offset_bottom = 29.0
+color = Color(0.45, 0.35, 0.25, 1)
+
+[node name="ConstructionSprite" type="ColorRect" parent="."]
+visible = false
+offset_left = -29.0
+offset_top = -29.0
+offset_right = 29.0
+offset_bottom = 29.0
+color = Color(0.45, 0.35, 0.25, 0.45)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_mine")
+
+[node name="SelectionRing" type="ColorRect" parent="."]
+visible = false
+offset_left = -34.0
+offset_top = -34.0
+offset_right = 34.0
+offset_bottom = 34.0
+color = Color(0, 1, 0, 0.5)
+
+[node name="HealthBar" type="ProgressBar" parent="."]
+offset_left = -29.0
+offset_top = -42.0
+offset_right = 29.0
+offset_bottom = -36.0
+show_percentage = false
+value = 100.0

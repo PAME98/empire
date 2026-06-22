@@ -12,6 +12,7 @@ signal time_changed(year: int, season: String, season_progress: float)
 signal citizen_born(citizen)
 signal citizen_died(citizen, cause: String)
 signal placement_mode_changed(active: bool, building_id: String)
+signal attack_targeting_mode_changed(active: bool, radius: float)
 signal notification(text: String)
 
 # ---------------------------------------------------------------------------
@@ -32,6 +33,7 @@ var adult_count: int = 0
 var elder_count: int = 0
 var all_citizens: Array = []
 var all_soldiers: Array = []
+var all_artillery: Array = []
 
 # ---------------------------------------------------------------------------
 # Time
@@ -52,6 +54,7 @@ const COSTS := {
 	"quarry":      {"wood": 40},
 	"barracks":    {"wood": 80, "stone": 40},
 	"soldier":     {"food": 60, "gold": 10},
+	"artillery":   {"food": 90, "wood": 20, "gold": 40},
 }
 
 const BUILD_TIMES := {
@@ -61,6 +64,7 @@ const BUILD_TIMES := {
 	"quarry": 7.0,
 	"barracks": 10.0,
 	"soldier": 8.0,
+	"artillery": 14.0,
 }
 
 # ---------------------------------------------------------------------------
@@ -77,6 +81,11 @@ var selected_resource_node = null
 var is_placing_building: bool = false
 var placement_building_id: String = ""
 var placement_builder = null  # citizen who queued the building, if any
+
+# ---------------------------------------------------------------------------
+# Artillery attack-position targeting (T then left-click an area)
+# ---------------------------------------------------------------------------
+var is_targeting_attack_position: bool = false
 
 
 func _process(delta: float) -> void:
@@ -198,6 +207,11 @@ func register_soldier(soldier) -> void:
 	population += 1
 	all_soldiers.append(soldier)
 	update_ui()
+	
+func register_artillery(artillery) -> void:
+	population += 1
+	all_artillery.append(artillery)
+	update_ui()
 
 
 func remove_population(unit, cause: String = "") -> void:
@@ -277,6 +291,19 @@ func cancel_building_placement() -> void:
 	placement_building_id = ""
 	placement_builder = null
 	placement_mode_changed.emit(false, "")
+
+
+# ---------------------------------------------------------------------------
+# Artillery attack-position targeting mode
+# ---------------------------------------------------------------------------
+func start_attack_position_targeting(radius: float = 60.0) -> void:
+	is_targeting_attack_position = true
+	attack_targeting_mode_changed.emit(true, radius)
+
+
+func cancel_attack_position_targeting() -> void:
+	is_targeting_attack_position = false
+	attack_targeting_mode_changed.emit(false, 0.0)
 
 
 func notify(text: String) -> void:

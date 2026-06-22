@@ -100,6 +100,10 @@ func command_build(_site) -> void:
 	pass  # overridden by Citizen
 
 
+func command_attack_position(_world_pos: Vector2) -> void:
+	pass  # overridden by Artillery — ground-targeted area attack
+
+
 func stop_special_orders() -> void:
 	pass  # subclasses clear job/target state here
 

@@ -1,6 +1,5 @@
 class_name Barracks
 extends Building
-
 ## Converts stockpiled resources into military units. This is the bridge
 ## between the economy half of the game and the RTS-combat half: soldiers
 ## cost food/gold the citizen economy produced, so a healthy economy is a
@@ -24,15 +23,13 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	super._process(delta)
-
 	if not is_constructed or not is_training or train_queue.is_empty():
 		return
-
 	train_elapsed += delta
-	var duration = GameManager.BUILD_TIMES.get("soldier", 8.0)
+	var unit_type = "artillery" if train_queue.front() == "artillery" else "soldier"
+	var duration = GameManager.BUILD_TIMES.get(unit_type, 8.0)
 	if train_bar:
 		train_bar.value = clampf(train_elapsed / duration * 100.0, 0.0, 100.0)
-
 	if train_elapsed >= duration:
 		_complete_training()
 		train_queue.pop_front()
@@ -48,7 +45,21 @@ func queue_soldier() -> bool:
 		GameManager.notify("Not enough resources to train a soldier.")
 		return false
 	GameManager.spend(cost)
-	train_queue.append(true)
+	train_queue.append("soldier")
+	if not is_training:
+		_start_next()
+	return true
+
+
+func queue_artillery() -> bool:
+	if not is_constructed:
+		return false
+	var cost = GameManager.COSTS.get("artillery", {})
+	if not GameManager.can_afford(cost):
+		GameManager.notify("Not enough resources to train artillery.")
+		return false
+	GameManager.spend(cost)
+	train_queue.append("artillery")
 	if not is_training:
 		_start_next()
 	return true
@@ -68,8 +79,13 @@ func _start_next() -> void:
 
 
 func _complete_training() -> void:
-	var soldier = preload("res://scenes/soldier.tscn").instantiate()
-	soldier.global_position = global_position + spawn_offset + Vector2(randf_range(-18, 18), randf_range(-18, 18))
-	soldier.team = team
-	get_tree().current_scene.get_node("Units").add_child(soldier)
-	GameManager.register_soldier(soldier)
+	var entry = train_queue.front()
+	var scene_path = "res://scenes/artillery.tscn" if entry == "artillery" else "res://scenes/soldier.tscn"
+	var unit = load(scene_path).instantiate()
+	unit.global_position = global_position + spawn_offset + Vector2(randf_range(-18, 18), randf_range(-18, 18))
+	unit.team = team
+	get_tree().current_scene.get_node("Units").add_child(unit)
+	if entry == "artillery":
+		GameManager.register_artillery(unit)
+	else:
+		GameManager.register_soldier(unit)

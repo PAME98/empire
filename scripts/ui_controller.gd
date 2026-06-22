@@ -30,6 +30,7 @@ extends CanvasLayer
 
 @onready var barracks_actions: VBoxContainer = $SelectionPanel/BarracksActions
 @onready var train_soldier_btn: Button = $SelectionPanel/BarracksActions/TrainSoldierButton
+@onready var train_artillery_btn: Button = $SelectionPanel/BarracksActions/TrainArtilleryButton
 
 @onready var notification_label: Label = $NotificationLabel
 
@@ -41,6 +42,7 @@ func _ready() -> void:
 	GameManager.time_changed.connect(_on_time_changed)
 	GameManager.selection_changed.connect(_on_selection_changed)
 	GameManager.placement_mode_changed.connect(_on_placement_mode_changed)
+	GameManager.attack_targeting_mode_changed.connect(_on_attack_targeting_mode_changed)
 	GameManager.notification.connect(_on_notification)
 
 	build_house_btn.pressed.connect(func(): _start_placement("house"))
@@ -51,6 +53,7 @@ func _ready() -> void:
 
 	recruit_citizen_btn.pressed.connect(_on_recruit_citizen_pressed)
 	train_soldier_btn.pressed.connect(_on_train_soldier_pressed)
+	train_artillery_btn.pressed.connect(_on_train_artillery_pressed)
 
 	selection_panel.visible = false
 	village_actions.visible = false
@@ -151,6 +154,12 @@ func _show_single_unit(unit) -> void:
 		selection_title.text = "Soldier"
 		selection_info.text = "Health: %d/%d\nDamage: %d" % [unit.health, unit.max_health, unit.attack_damage]
 		selection_hint.text = "Right-click an enemy to attack, or ground to move."
+	elif unit is Artillery:
+		selection_title.text = "Artillery"
+		selection_info.text = "Health: %d/%d\nDamage: %d (splash radius %d)" % [
+			unit.health, unit.max_health, unit.attack_damage, int(unit.splash_radius)
+		]
+		selection_hint.text = "Right-click an enemy to bombard it. Press T, then left-click ground for an area strike."
 	else:
 		selection_title.text = "Unit"
 		selection_info.text = ""
@@ -160,9 +169,12 @@ func _show_single_unit(unit) -> void:
 func _group_summary(units: Array) -> String:
 	var citizens = 0
 	var soldiers = 0
+	var artillery = 0
 	for u in units:
 		if u is Citizen:
 			citizens += 1
+		elif u is Artillery:
+			artillery += 1
 		elif u is Soldier:
 			soldiers += 1
 	var parts: Array[String] = []
@@ -170,6 +182,8 @@ func _group_summary(units: Array) -> String:
 		parts.append("%d citizens" % citizens)
 	if soldiers > 0:
 		parts.append("%d soldiers" % soldiers)
+	if artillery > 0:
+		parts.append("%d artillery" % artillery)
 	return ", ".join(parts)
 
 
@@ -219,12 +233,15 @@ func _refresh_selected_building_info() -> void:
 		if not building.is_constructed:
 			selection_info.text = "Construction: %d%%" % int(clampf(building.build_progress / building.build_time * 100.0, 0.0, 100.0))
 		elif building.is_training:
-			var pct = int(clampf(building.train_elapsed / GameManager.BUILD_TIMES.get("soldier", 8.0) * 100.0, 0.0, 100.0))
-			selection_info.text = "Training soldier: %d%%\nQueued: %d" % [pct, building.train_queue.size() - 1]
+			var current_id: String = building.train_queue[0]
+			var duration = GameManager.BUILD_TIMES.get(current_id, 8.0)
+			var pct = int(clampf(building.train_elapsed / duration * 100.0, 0.0, 100.0))
+			selection_info.text = "Training %s: %d%%\nQueued: %d" % [current_id.capitalize(), pct, building.train_queue.size() - 1]
 		else:
-			selection_info.text = "Idle — train a soldier."
+			selection_info.text = "Idle — train a soldier or artillery."
 		var soldier_cost = GameManager.COSTS.get("soldier", {})
-		selection_hint.text = "Costs %d food, %d gold." % [soldier_cost.get("food", 0), soldier_cost.get("gold", 0)]
+		var artillery_cost = GameManager.COSTS.get("artillery", {})
+		selection_hint.text = ""
 
 	elif building is ResourceBuilding:
 		var status = "under construction" if not building.is_constructed else "%d/%d workers, stockpile %d" % [
@@ -244,10 +261,25 @@ func _on_train_soldier_pressed() -> void:
 		GameManager.selected_building.queue_soldier()
 
 
+func _on_train_artillery_pressed() -> void:
+	if GameManager.selected_building is Barracks:
+		GameManager.selected_building.queue_artillery()
+
+
+# ---------------------------------------------------------------------------
+# Artillery attack-position targeting
+# ---------------------------------------------------------------------------
+func _on_attack_targeting_mode_changed(active: bool, radius: float) -> void:
+	if active:
+		_on_notification("Attack-position mode: left-click an area to bombard it (blast radius %d). Right-click or Esc to cancel." % int(radius))
+
+
 # ---------------------------------------------------------------------------
 # Build menu
 # ---------------------------------------------------------------------------
 func _start_placement(building_id: String) -> void:
+	if GameManager.is_targeting_attack_position:
+		GameManager.cancel_attack_position_targeting()
 	var builder = null
 	if GameManager.selected_units.size() == 1 and GameManager.selected_units[0] is Citizen:
 		builder = GameManager.selected_units[0]
