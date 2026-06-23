@@ -1,14 +1,14 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene format=3 uid="uid://dwp4vfkqy6y16"]
 
-[ext_resource type="Script" path="res://scripts/core/main.gd" id="1_main"]
-[ext_resource type="Script" path="res://scripts/input/camera_controller.gd" id="2_cam"]
+[ext_resource type="Script" uid="uid://bm6hswb5o3att" path="res://scripts/core/main.gd" id="1_main"]
+[ext_resource type="Script" uid="uid://br1f8mq7tjqk3" path="res://scripts/input/camera_controller.gd" id="2_cam"]
 [ext_resource type="PackedScene" path="res://scenes/effects/attack_area_indicator.tscn" id="3_tipki"]
 [ext_resource type="PackedScene" path="res://scenes/buildings/village_center.tscn" id="3_vc"]
-[ext_resource type="PackedScene" path="res://scenes/buildings/house.tscn" id="4_house"]
+[ext_resource type="PackedScene" uid="uid://ccxbnlwgsjvmg" path="res://scenes/buildings/house.tscn" id="4_house"]
 [ext_resource type="PackedScene" path="res://scenes/world/tree.tscn" id="5_tree"]
-[ext_resource type="Script" path="res://scripts/ui/ui_controller.gd" id="6_ui"]
+[ext_resource type="Script" uid="uid://ryj3wh71g50v" path="res://scripts/ui/ui_controller.gd" id="6_ui"]
 [ext_resource type="PackedScene" path="res://scenes/units/citizen.tscn" id="7_citizen"]
-[ext_resource type="Script" path="res://scripts/world/map_generator.gd" id="9_85g3d"]
+[ext_resource type="Script" uid="uid://b23jp0da2u5ms" path="res://scripts/world/map_generator.gd" id="9_85g3d"]
 
 [sub_resource type="Environment" id="Env"]
 background_mode = 1
@@ -17,99 +17,99 @@ ambient_light_source = 2
 ambient_light_color = Color(1, 1, 1, 1)
 ambient_light_energy = 0.55
 
-[sub_resource type="StandardMaterial3D" id="GroundMat"]
-albedo_color = Color(0.26, 0.5, 0.2, 1)
-
 [sub_resource type="StandardMaterial3D" id="GhostMat"]
 transparency = 1
 albedo_color = Color(0.9, 0.8, 0.3, 0.5)
 
-[sub_resource type="PlaneMesh" id="GroundMesh"]
-size = Vector2(1280, 720)
-material = SubResource("GroundMat")
-
 [sub_resource type="BoxMesh" id="GhostMesh"]
-size = Vector3(50, 30, 50)
 material = SubResource("GhostMat")
+size = Vector3(50, 30, 50)
 
-[node name="Main" type="Node3D"]
+[sub_resource type="StandardMaterial3D" id="GroundMat"]
+albedo_color = Color(0.26, 0.5, 0.2, 1)
+
+[sub_resource type="PlaneMesh" id="GroundMesh"]
+material = SubResource("GroundMat")
+size = Vector2(1280, 720)
+
+[node name="Main" type="Node3D" unique_id=316294438]
 script = ExtResource("1_main")
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=949089230]
 environment = SubResource("Env")
 
-[node name="Sun" type="DirectionalLight3D" parent="."]
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=1242065405]
 transform = Transform3D(1, 0, 0, 0, 0.5736, 0.8192, 0, -0.8192, 0.5736, 0, 600, 0)
 
-[node name="Camera" type="Node3D" parent="."]
+[node name="Camera" type="Node3D" parent="." unique_id=1687863591]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 640, 0, 360)
 script = ExtResource("2_cam")
 
-[node name="Camera3D" type="Camera3D" parent="Camera"]
+[node name="Camera3D" type="Camera3D" parent="Camera" unique_id=1787475829]
 transform = Transform3D(1, 0, 0, 0, 0.5736, 0.8192, 0, -0.8192, 0.5736, 0, 817, 573)
 far = 12000.0
 
-[node name="PlacementGhost" type="MeshInstance3D" parent="."]
+[node name="PlacementGhost" type="MeshInstance3D" parent="." unique_id=764303389]
 visible = false
 mesh = SubResource("GhostMesh")
 
-[node name="AttackAreaGhost" parent="." instance=ExtResource("3_tipki")]
+[node name="AttackAreaGhost" parent="." unique_id=1326477324 instance=ExtResource("3_tipki")]
 visible = false
 
-[node name="Ground" type="MeshInstance3D" parent="."]
+[node name="Ground" type="MeshInstance3D" parent="." unique_id=82609759]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 640, 0, 360)
 mesh = SubResource("GroundMesh")
 
-[node name="Buildings" type="Node3D" parent="."]
+[node name="Buildings" type="Node3D" parent="." unique_id=802244283]
 
-[node name="VillageCenter" parent="Buildings" instance=ExtResource("3_vc")]
+[node name="VillageCenter" parent="Buildings" unique_id=1178544456 instance=ExtResource("3_vc")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 640, 0, 360)
 
-[node name="House" parent="Buildings" instance=ExtResource("4_house")]
+[node name="House" parent="Buildings" unique_id=578934285 instance=ExtResource("4_house")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 520, 0, 460)
 starts_built = true
 
-[node name="Resources" type="Node3D" parent="."]
+[node name="Resources" type="Node3D" parent="." unique_id=2094997741]
 
-[node name="Tree1" parent="Resources" instance=ExtResource("5_tree")]
+[node name="Tree1" parent="Resources" unique_id=1899928526 instance=ExtResource("5_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 220, 0, 220)
 
-[node name="Tree2" parent="Resources" instance=ExtResource("5_tree")]
+[node name="Tree2" parent="Resources" unique_id=220115131 instance=ExtResource("5_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 380, 0, 160)
 
-[node name="Tree3" parent="Resources" instance=ExtResource("5_tree")]
+[node name="Tree3" parent="Resources" unique_id=1572063123 instance=ExtResource("5_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 160, 0, 440)
 
-[node name="Tree4" parent="Resources" instance=ExtResource("5_tree")]
+[node name="Tree4" parent="Resources" unique_id=1497003434 instance=ExtResource("5_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 980, 0, 260)
 
-[node name="Tree5" parent="Resources" instance=ExtResource("5_tree")]
+[node name="Tree5" parent="Resources" unique_id=1195276734 instance=ExtResource("5_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 880, 0, 540)
 
-[node name="Tree6" parent="Resources" instance=ExtResource("5_tree")]
+[node name="Tree6" parent="Resources" unique_id=695253141 instance=ExtResource("5_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1180, 0, 420)
 
-[node name="Tree7" parent="Resources" instance=ExtResource("5_tree")]
+[node name="Tree7" parent="Resources" unique_id=1863900235 instance=ExtResource("5_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 420, 0, 640)
 
-[node name="Tree8" parent="Resources" instance=ExtResource("5_tree")]
+[node name="Tree8" parent="Resources" unique_id=1268176335 instance=ExtResource("5_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 760, 0, 160)
 
-[node name="Units" type="Node3D" parent="."]
+[node name="Units" type="Node3D" parent="." unique_id=2005692865]
 
-[node name="Citizen1" parent="Units" instance=ExtResource("7_citizen")]
+[node name="Citizen1" parent="Units" unique_id=1996167963 instance=ExtResource("7_citizen")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 590, 0, 420)
 
-[node name="Citizen2" parent="Units" instance=ExtResource("7_citizen")]
+[node name="Citizen2" parent="Units" unique_id=2136260277 instance=ExtResource("7_citizen")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 680, 0, 420)
 
-[node name="Citizen3" parent="Units" instance=ExtResource("7_citizen")]
+[node name="Citizen3" parent="Units" unique_id=1645466464 instance=ExtResource("7_citizen")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 640, 0, 460)
 
-[node name="Citizen4" parent="Units" instance=ExtResource("7_citizen")]
+[node name="Citizen4" parent="Units" unique_id=1538655534 instance=ExtResource("7_citizen")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 560, 0, 320)
 
-[node name="Citizen5" parent="Units" instance=ExtResource("7_citizen")]
+[node name="Citizen5" parent="Units" unique_id=1642755826 instance=ExtResource("7_citizen")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 720, 0, 320)
 
 [node name="UI" type="CanvasLayer" parent="." unique_id=1259264752]
@@ -149,12 +149,12 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 16
 text = "Stone: 100"
 
-[node name="IronLabel" type="Label" parent="UI/TopBar/Resources"]
+[node name="IronLabel" type="Label" parent="UI/TopBar/Resources" unique_id=1294409918]
 layout_mode = 2
 theme_override_font_sizes/font_size = 16
 text = "Iron: 0"
 
-[node name="WaterLabel" type="Label" parent="UI/TopBar/Resources"]
+[node name="WaterLabel" type="Label" parent="UI/TopBar/Resources" unique_id=97884030]
 layout_mode = 2
 theme_override_font_sizes/font_size = 16
 text = "Water: 60"
@@ -350,7 +350,7 @@ offset_bottom = 52.0
 text = "Quarry
 40W"
 
-[node name="MineButton" type="Button" parent="UI/BuildMenu"]
+[node name="MineButton" type="Button" parent="UI/BuildMenu" unique_id=346391477]
 layout_mode = 0
 offset_left = 554.0
 offset_top = 8.0
@@ -383,11 +383,11 @@ theme_override_colors/font_color = Color(1, 0.85, 0.3, 1)
 theme_override_font_sizes/font_size = 13
 horizontal_alignment = 1
 
-[node name="SelectionBox" type="ColorRect" parent="UI"]
+[node name="SelectionBox" type="ColorRect" parent="UI" unique_id=477977676]
 visible = false
 offset_right = 40.0
 offset_bottom = 40.0
 color = Color(0.2, 0.55, 1, 0.25)
 
-[node name="MapGenerator" type="Node3D" parent="."]
+[node name="MapGenerator" type="Node3D" parent="." unique_id=1138111598]
 script = ExtResource("9_85g3d")

@@ -24,49 +24,52 @@ const SPAWN_SAFE_RADIUS := 220.0
 # ---------------------------------------------------------------------------
 # Forests
 # ---------------------------------------------------------------------------
-const FOREST_CLUSTERS_PER_MPX := 12.0   # clusters per 1,000,000 px²
+const FOREST_CLUSTERS_PER_MPX := 12.0
 const TREES_PER_CLUSTER_MIN   := 5
 const TREES_PER_CLUSTER_MAX   := 14
 const FOREST_SPREAD           := 90.0
 
 # ---------------------------------------------------------------------------
-# Mountains — solid terrain ranges. Every mountain tile holds stone; a fraction
-# of them also hold iron. Quarries (stone) and mines (iron) are built on them.
+# Mountains
 # ---------------------------------------------------------------------------
-const MOUNTAIN_RANGES_PER_MPX := 4.0    # mountain ranges per 1,000,000 px²
+const MOUNTAIN_RANGES_PER_MPX := 4.0
 const MOUNTAINS_PER_RANGE_MIN := 6
 const MOUNTAINS_PER_RANGE_MAX := 16
-const MOUNTAIN_SPREAD         := 66.0   # tile spacing within a range (tight = connected ridge)
-const MOUNTAIN_STONE_MIN      := 4000
-const MOUNTAIN_STONE_MAX      := 9000
-const IRON_MOUNTAIN_CHANCE    := 0.35   # chance a given mountain tile also bears iron
-const MOUNTAIN_IRON_MIN       := 1500
-const MOUNTAIN_IRON_MAX       := 4500
+const MOUNTAIN_SPREAD         := 66.0
+const MOUNTAIN_STONE_MIN      := 400
+const MOUNTAIN_STONE_MAX      := 900
+const IRON_MOUNTAIN_CHANCE    := 0.35
+const MOUNTAIN_IRON_MIN       := 150
+const MOUNTAIN_IRON_MAX       := 450
 
 # ---------------------------------------------------------------------------
-# Water (rivers = chains of water ResourceNodes + a decorative line)
+# Water
 # ---------------------------------------------------------------------------
-const RIVER_COUNT_MIN   := 1
-const RIVER_COUNT_MAX   := 3
-const RIVER_NODE_SPACING := 70.0    # px between gatherable water nodes along a river
-const RIVER_LINE_WIDTH  := 26.0
-const RIVER_COLOR       := Color(0.18, 0.45, 0.72, 0.55)
+const RIVER_COUNT_MIN    := 1
+const RIVER_COUNT_MAX    := 3
+const RIVER_NODE_SPACING := 70.0
+const GROUND_RIVER_BASE  := "res://assets/kenney/nature/models/"
+const RIVER_TILE_SCALE   := 80.0   # slightly smaller than ground so no gaps
+
+# ---------------------------------------------------------------------------
+# Ground
+# ---------------------------------------------------------------------------
+const GROUND_TILE_SCENE := "res://assets/kenney/nature/models/ground_grass.glb"
+const GROUND_TILE_SCALE := 100.0
 
 # ---------------------------------------------------------------------------
 # Internal
 # ---------------------------------------------------------------------------
 var _rng := RandomNumberGenerator.new()
-var _map_rect: Rect2     # (0,0) .. (size)
+var _map_rect: Rect2
 var _center: Vector2
 
 
 func _ready() -> void:
 	_rng.randomize()
-
 	var size: Vector2 = MapSettings.map_size
 	_map_rect = Rect2(Vector2.ZERO, size)
 	_center   = size * 0.5
-
 	_resize_ground(size)
 	_recenter_start(size)
 	_generate_rivers()
@@ -82,43 +85,48 @@ func _resize_ground(size: Vector2) -> void:
 	if ground == null:
 		push_warning("MapGenerator: no Ground node found — skipping resize.")
 		return
-	if ground.mesh is PlaneMesh:
-		ground.mesh.size = size
-	# PlaneMesh is centred on its origin, so move the ground to the map centre.
-	ground.position = Vector3(size.x * 0.5, 0.0, size.y * 0.5)
+	if ground is MeshInstance3D:
+		ground.mesh = null
+		ground.visible = false
+
+	var packed := load(GROUND_TILE_SCENE) as PackedScene
+	if packed == null:
+		push_warning("MapGenerator: could not load ground tile " + GROUND_TILE_SCENE)
+		return
+
+	var cols := int(ceil(size.x / GROUND_TILE_SCALE))
+	var rows := int(ceil(size.y / GROUND_TILE_SCALE))
+	var container := Node3D.new()
+	container.name = "GroundTiles"
+
+	for row in rows:
+		for col in cols:
+			var tile: Node3D = packed.instantiate()
+			tile.scale    = Vector3.ONE * GROUND_TILE_SCALE
+			tile.position = Vector3(
+				col * GROUND_TILE_SCALE + GROUND_TILE_SCALE * 0.5,
+				-0.1,
+				row * GROUND_TILE_SCALE + GROUND_TILE_SCALE * 0.5
+			)
+			container.add_child(tile)
+
+	get_tree().current_scene.add_child.call_deferred(container)
 
 
 # ---------------------------------------------------------------------------
-# Recentre the starting village/units/camera onto the map centre so the
-# player never starts out of bounds regardless of map size.
+# Recentre
 # ---------------------------------------------------------------------------
 func _recenter_start(size: Vector2) -> void:
-	var scene := get_tree().current_scene
-
-	# The original scene was authored around (640, 360) as the "start point".
-	# Shift everything by the delta between that and the new map centre.
+	var scene      := get_tree().current_scene
 	var old_anchor := Vector2(640, 360)
-	var delta := _center - old_anchor
-	var delta3 := Vector3(delta.x, 0.0, delta.y)
+	var delta      := _center - old_anchor
+	var delta3     := Vector3(delta.x, 0.0, delta.y)
 
-	var buildings := scene.get_node_or_null("Buildings")
-	if buildings:
-		for b in buildings.get_children():
-			b.position += delta3
-
-	var units := scene.get_node_or_null("Units")
-	if units:
-		for u in units.get_children():
-			u.position += delta3
-
-	# The hand-placed starting trees live under Resources and were authored
-	# around the old anchor too. Procedural resources are added *after* this
-	# runs (in absolute map coords), so at this point Resources only holds the
-	# starter nodes — shift them so the player still spawns next to wood.
-	var resources := scene.get_node_or_null("Resources")
-	if resources:
-		for r in resources.get_children():
-			r.position += delta3
+	for group_name in ["Buildings", "Units", "Resources"]:
+		var g := scene.get_node_or_null(group_name)
+		if g:
+			for child in g.get_children():
+				child.position += delta3
 
 	var cam := scene.get_node_or_null("Camera")
 	if cam:
@@ -126,37 +134,13 @@ func _recenter_start(size: Vector2) -> void:
 
 
 # ---------------------------------------------------------------------------
-# Rivers — a decorative Line2D plus gatherable water ResourceNodes along it
+# Rivers
 # ---------------------------------------------------------------------------
-func _generate_rivers() -> void:
-	var resources := _get_or_create("Resources")
-	var water_scene := load(WATER_SCENE)
-	if water_scene == null:
-		return
-	var count := _rng.randi_range(RIVER_COUNT_MIN, RIVER_COUNT_MAX)
-
-	for _i in count:
-		var points := _river_path()
-		var dist_acc := 0.0
-		for i in range(1, points.size()):
-			var seg :Vector2 = points[i] - points[i - 1]
-			var seg_len := seg.length()
-			dist_acc += seg_len
-			if dist_acc >= RIVER_NODE_SPACING:
-				dist_acc = 0.0
-				var pos: Vector2 = points[i]
-				if pos.distance_to(_center) < SPAWN_SAFE_RADIUS:
-					continue
-				var water: Node3D = water_scene.instantiate()
-				resources.add_child(water)
-				water.global_position = _to3(pos)
-
-
 func _river_path() -> Array:
-	var edge := _rng.randi() % 4
-	var r := _map_rect
-	var start: Vector2
-	var end: Vector2
+	var edge  := _rng.randi() % 4
+	var r     := _map_rect
+	var start : Vector2
+	var end   : Vector2
 	match edge:
 		0:
 			start = Vector2(_rng.randf_range(r.position.x, r.end.x), r.position.y)
@@ -174,7 +158,7 @@ func _river_path() -> Array:
 	var points: Array = []
 	var segments := 18
 	for i in segments + 1:
-		var t := float(i) / segments
+		var t    := float(i) / segments
 		var base := start.lerp(end, t)
 		var jitter := Vector2(
 			_rng.randf_range(-60.0, 60.0),
@@ -184,32 +168,118 @@ func _river_path() -> Array:
 	return points
 
 
+func _generate_rivers() -> void:
+	var resources  := _get_or_create("Resources")
+	var water_scene := load(WATER_SCENE)
+	if water_scene == null:
+		return
+	var count := _rng.randi_range(RIVER_COUNT_MIN, RIVER_COUNT_MAX)
+	for _i in count:
+		var points := _river_path()
+		_place_river_tiles(points)
+		_place_river_gameplay_nodes(points, resources, water_scene)
+
+
+func _place_river_gameplay_nodes(points: Array, resources: Node3D, water_scene: PackedScene) -> void:
+	var dist_acc := 0.0
+	for i in range(1, points.size()):
+		var seg: Vector2 = points[i] - points[i - 1]
+		dist_acc += seg.length()
+		if dist_acc >= RIVER_NODE_SPACING:
+			dist_acc = 0.0
+			var pos: Vector2 = points[i]
+			if pos.distance_to(_center) < SPAWN_SAFE_RADIUS:
+				continue
+			var water: Node3D = water_scene.instantiate()
+			resources.add_child(water)
+			water.global_position = _to3(pos)
+			# Hide placeholder mesh — river tiles provide the visual
+			var mesh_node := water.get_node_or_null("Mesh")
+			if mesh_node:
+				mesh_node.visible = false
+
+
+func _place_river_tiles(points: Array) -> void:
+	if points.size() < 2:
+		return
+
+	var straight := load(GROUND_RIVER_BASE + "ground_riverStraight.glb") as PackedScene
+	if straight == null:
+		push_warning("MapGenerator: could not load ground_riverStraight.glb")
+		return
+
+	# Build a water material once
+	var water_mat := StandardMaterial3D.new()
+	water_mat.albedo_color     = Color(0.18, 0.45, 0.72, 0.75)
+	water_mat.transparency     = BaseMaterial3D.TRANSPARENCY_ALPHA
+	water_mat.roughness        = 0.1
+	water_mat.metallic         = 0.2
+	water_mat.shading_mode     = BaseMaterial3D.SHADING_MODE_UNSHADED
+
+	var container := Node3D.new()
+	container.name = "RiverTiles"
+
+	var dist_acc := 0.0
+	for i in range(1, points.size()):
+		var seg: Vector2 = points[i] - points[i - 1]
+		var seg_len := seg.length()
+		if seg_len < 0.001:
+			continue
+		var seg_dir := seg.normalized()
+		dist_acc += seg_len
+
+		while dist_acc >= RIVER_TILE_SCALE:
+			dist_acc -= RIVER_TILE_SCALE
+			var t   := clampf(1.0 - (dist_acc / seg_len), 0.0, 1.0)
+			var pos : Vector2 = points[i - 1].lerp(points[i], t)
+			# Clamp to map instead of skipping — fixes edge gaps
+			pos.x = clampf(pos.x, _map_rect.position.x, _map_rect.end.x)
+			pos.y = clampf(pos.y, _map_rect.position.y, _map_rect.end.y)
+
+			var rot_y := atan2(seg_dir.x, seg_dir.y)
+
+			# Ground channel tile
+			var tile: Node3D = straight.instantiate()
+			tile.scale      = Vector3.ONE * RIVER_TILE_SCALE
+			tile.position   = Vector3(pos.x, -0.05, pos.y)
+			tile.rotation.y = rot_y
+			container.add_child(tile)
+
+			# Water surface — a thin plane sitting just above the channel floor
+			# The channel in the GLB is roughly 40% of the tile width and centered
+			var water_mesh              := MeshInstance3D.new()
+			var plane                   := PlaneMesh.new()
+			plane.size                  = Vector2(RIVER_TILE_SCALE * 0.38, RIVER_TILE_SCALE)
+			water_mesh.mesh             = plane
+			water_mesh.material_override = water_mat
+			water_mesh.position         = Vector3(pos.x, 0.18, pos.y)
+			water_mesh.rotation.y       = rot_y
+			container.add_child(water_mesh)
+
+	get_tree().current_scene.add_child.call_deferred(container)
+
 # ---------------------------------------------------------------------------
-# Mountain ranges — elongated ridges of solid mountain tiles. Every tile holds
-# stone; a fraction also hold iron (shown by a vein marker). Quarries and mines
-# are built directly on these.
+# Mountains
 # ---------------------------------------------------------------------------
 func _generate_mountain_ranges() -> void:
-	var resources := _get_or_create("Resources")
-	var scene := load(MOUNTAIN_SCENE)
+	var resources   := _get_or_create("Resources")
+	var scene       := load(MOUNTAIN_SCENE)
 	if scene == null:
 		push_warning("MapGenerator: could not load " + MOUNTAIN_SCENE)
 		return
 
-	var area_mpx := (_map_rect.size.x * _map_rect.size.y) / 1_000_000.0
-	var ranges :Variant = max(int(round(area_mpx * MOUNTAIN_RANGES_PER_MPX)), 1)
+	var area_mpx  := (_map_rect.size.x * _map_rect.size.y) / 1_000_000.0
+	var ranges    :Variant = max(int(round(area_mpx * MOUNTAIN_RANGES_PER_MPX)), 1)
 	var safe_radius := SPAWN_SAFE_RADIUS * 1.3
 
 	for _r in ranges:
 		var centre := _random_map_point(safe_radius)
-		# Give each range a random orientation so it reads as a ridge line
-		# rather than a circular blob.
-		var dir := Vector2.RIGHT.rotated(_rng.randf() * TAU)
-		var perp := dir.orthogonal()
-		var count := _rng.randi_range(MOUNTAINS_PER_RANGE_MIN, MOUNTAINS_PER_RANGE_MAX)
+		var dir    := Vector2.RIGHT.rotated(_rng.randf() * TAU)
+		var perp   := dir.orthogonal()
+		var count  := _rng.randi_range(MOUNTAINS_PER_RANGE_MIN, MOUNTAINS_PER_RANGE_MAX)
 
 		for _n in count:
-			var along := _rng.randf_range(-1.0, 1.0)
+			var along  := _rng.randf_range(-1.0, 1.0)
 			var across := _rng.randf_range(-0.45, 0.45)
 			var pos: Vector2 = centre + dir * along * MOUNTAIN_SPREAD * 2.4 + perp * across * MOUNTAIN_SPREAD
 			if not _map_rect.has_point(pos):
@@ -219,11 +289,8 @@ func _generate_mountain_ranges() -> void:
 			var m: Node3D = scene.instantiate()
 			resources.add_child(m)
 			m.global_position = _to3(pos)
-			m.stone_amount = _rng.randi_range(MOUNTAIN_STONE_MIN, MOUNTAIN_STONE_MAX)
-			if _rng.randf() < IRON_MOUNTAIN_CHANCE:
-				m.iron_amount = _rng.randi_range(MOUNTAIN_IRON_MIN, MOUNTAIN_IRON_MAX)
-			else:
-				m.iron_amount = 0
+			m.stone_amount    = _rng.randi_range(MOUNTAIN_STONE_MIN, MOUNTAIN_STONE_MAX)
+			m.iron_amount     = _rng.randi_range(MOUNTAIN_IRON_MIN, MOUNTAIN_IRON_MAX) if _rng.randf() < IRON_MOUNTAIN_CHANCE else 0
 
 
 # ---------------------------------------------------------------------------
@@ -237,27 +304,23 @@ func _generate_forests() -> void:
 	)
 
 
-# ---------------------------------------------------------------------------
-# Generic cluster scatter — used by forests, mountains and iron.
-# ---------------------------------------------------------------------------
 func _scatter_clusters(
 	scene_path: String, clusters_per_mpx: float,
 	per_cluster_min: int, per_cluster_max: int,
 	spread: float, safe_radius: float
 ) -> void:
 	var resources := _get_or_create("Resources")
-	var scene := load(scene_path)
+	var scene     := load(scene_path)
 	if scene == null:
 		push_warning("MapGenerator: could not load " + scene_path)
 		return
 
 	var area_mpx := (_map_rect.size.x * _map_rect.size.y) / 1_000_000.0
-	var clusters := int(round(area_mpx * clusters_per_mpx))
-	clusters = max(clusters, 2)
+	var clusters :Variant = max(int(round(area_mpx * clusters_per_mpx)), 2)
 
 	for _c in clusters:
 		var centre := _random_map_point(safe_radius)
-		var count := _rng.randi_range(per_cluster_min, per_cluster_max)
+		var count  := _rng.randi_range(per_cluster_min, per_cluster_max)
 		for _n in count:
 			var offset := Vector2(
 				_rng.randf_range(-spread, spread),
@@ -277,15 +340,13 @@ func _scatter_clusters(
 # Helpers
 # ---------------------------------------------------------------------------
 func _random_map_point(min_dist_from_center: float = 0.0) -> Vector2:
-	var attempts := 0
-	while attempts < 30:
+	for _attempt in 30:
 		var p := Vector2(
 			_rng.randf_range(_map_rect.position.x, _map_rect.end.x),
 			_rng.randf_range(_map_rect.position.y, _map_rect.end.y)
 		)
 		if p.distance_to(_center) >= min_dist_from_center:
 			return p
-		attempts += 1
 	return _center + Vector2(min_dist_from_center, min_dist_from_center)
 
 
@@ -295,9 +356,9 @@ func _to3(v: Vector2, y: float = 0.0) -> Vector3:
 
 func _get_or_create(node_name: String) -> Node3D:
 	var scene := get_tree().current_scene
-	var n := scene.get_node_or_null(node_name)
+	var n     := scene.get_node_or_null(node_name)
 	if n == null:
-		n = Node3D.new()
+		n      = Node3D.new()
 		n.name = node_name
 		scene.add_child(n)
 	return n

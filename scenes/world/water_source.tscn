@@ -1,29 +1,28 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene format=3 uid="uid://cu07s0bh55hly"]
 
-[ext_resource type="Script" path="res://scripts/world/resource_node.gd" id="1_s"]
+[ext_resource type="Script" uid="uid://c03xyerf11nr1" path="res://scripts/world/resource_node.gd" id="1_s"]
 
 [sub_resource type="StandardMaterial3D" id="WMat"]
-albedo_color = Color(0.2, 0.5, 0.8, 0.85)
 transparency = 1
+albedo_color = Color(0.2, 0.5, 0.8, 0.85)
+
+[sub_resource type="BoxMesh" id="WMesh"]
+material = SubResource("WMat")
+size = Vector3(44, 4, 44)
 
 [sub_resource type="BoxShape3D" id="WShape"]
 size = Vector3(44, 4, 44)
 
-[sub_resource type="BoxMesh" id="WMesh"]
-size = Vector3(44, 4, 44)
-material = SubResource("WMat")
-
-[node name="ResourceNode" type="StaticBody3D" groups=["resources", "water_sources"]]
+[node name="ResourceNode" type="StaticBody3D" unique_id=555531321 groups=["resources", "water_sources"]]
 script = ExtResource("1_s")
 resource_type = "water"
 amount = 99999
 resource_group = "water_sources"
 
-[node name="Mesh" type="MeshInstance3D" parent="."]
+[node name="Mesh" type="MeshInstance3D" parent="." unique_id=2111157057]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
 mesh = SubResource("WMesh")
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1141162200]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
 shape = SubResource("WShape")
-

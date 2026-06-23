@@ -1,55 +1,44 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene format=3 uid="uid://dt5pdg4nyth2j"]
 
-[ext_resource type="Script" path="res://scripts/buildings/farm.gd" id="1_s"]
+[ext_resource type="Script" uid="uid://b5uxoyh4mfw6b" path="res://scripts/buildings/farm.gd" id="1_s"]
 
 [sub_resource type="StandardMaterial3D" id="FinMat"]
-albedo_color = Color(0.85, 0.78, 0.25, 1.0)
+albedo_color = Color(0.85, 0.78, 0.25, 1)
 
-[sub_resource type="StandardMaterial3D" id="ConMat"]
-albedo_color = Color(0.85, 0.78, 0.25, 0.4)
-transparency = 1
+[sub_resource type="BoxMesh" id="FinMesh"]
+material = SubResource("FinMat")
+size = Vector3(64, 18, 64)
 
 [sub_resource type="BoxShape3D" id="Shape"]
 size = Vector3(64, 18, 64)
 
 [sub_resource type="StandardMaterial3D" id="SelectionRing_mat"]
-albedo_color = Color(0, 1, 0, 0.5)
 transparency = 1
 shading_mode = 0
-
-[sub_resource type="BoxMesh" id="FinMesh"]
-size = Vector3(64, 18, 64)
-material = SubResource("FinMat")
-
-[sub_resource type="BoxMesh" id="ConMesh"]
-size = Vector3(64, 18, 64)
-material = SubResource("ConMat")
+albedo_color = Color(0, 1, 0, 0.5)
 
 [sub_resource type="CylinderMesh" id="SelectionRing_mesh"]
-top_radius = 40
-bottom_radius = 40
-height = 0.5
 material = SubResource("SelectionRing_mat")
+top_radius = 40.0
+bottom_radius = 40.0
+height = 0.5
 
-[node name="Farm" type="StaticBody3D" groups=["buildings", "farms", "food_sources"]]
+[node name="Farm" type="StaticBody3D" unique_id=649887934 groups=["buildings", "farms", "food_sources"]]
 script = ExtResource("1_s")
-build_time = 6.0
 
-[node name="FinishedMesh" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 9.0, 0)
+[node name="FinishedMesh" type="MeshInstance3D" parent="." unique_id=1261180331]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 9, 0)
 mesh = SubResource("FinMesh")
 
-[node name="ConstructionMesh" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 9.0, 0)
+[node name="ConstructionMesh" type="MeshInstance3D" parent="." unique_id=644238626]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 9, 0)
 visible = false
-mesh = SubResource("ConMesh")
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 9.0, 0)
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1490684069]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 9, 0)
 shape = SubResource("Shape")
 
-[node name="SelectionRing" type="MeshInstance3D" parent="."]
+[node name="SelectionRing" type="MeshInstance3D" parent="." unique_id=565748292]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0)
 visible = false
 mesh = SubResource("SelectionRing_mesh")
-

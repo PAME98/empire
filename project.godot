@@ -19,6 +19,7 @@ config/icon="res://icon.svg"
 
 GameManager="*res://scripts/core/game_manager.gd"
 MapSettings="*uid://f5osw15nbhyj"
+MeshSwapper="*uid://dvj2tcph4cr1c"
 
 [display]
 
