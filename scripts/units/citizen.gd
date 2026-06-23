@@ -40,6 +40,11 @@ var order_kind: String = ""  # "gather", "build", "move"
 
 var _gather_timer: float = 0.0
 var _job_search_cooldown: float = 0.0
+## Set by command_return_to_work() right before a delivery starts; tells
+## _continue_delivery() which workplace to resume once the cargo is dropped
+## off, instead of leaving the citizen idle or falling through to a
+## "gather" player order that was never actually issued.
+var _resume_workplace_after_delivery = null
 
 @onready var sprite: Node = get_node_or_null("Mesh")
 @onready var job_icon: Node = get_node_or_null("JobIcon")
@@ -191,7 +196,7 @@ func _auto_work_job(delta: float) -> void:
 		workplace = null
 		return
 
-	if global_position.distance_to(workplace.global_position) > _interaction_range(workplace):
+	if global_position.distance_to(workplace.global_position) > _interaction_range(workplace) and not has_stalled_near_target():
 		move_to(workplace.global_position)
 		return
 
@@ -212,6 +217,18 @@ func _auto_work_job(delta: float) -> void:
 		# instead of standing here harvesting zero forever.
 		_leave_workplace()
 		current_job = Job.NONE
+		return
+	else:
+		# Workplace is depleted (got == 0) but we're holding a PARTIAL load
+		# (more than zero, less than carry_capacity). Previously neither
+		# branch above fired here, so the citizen froze permanently, still
+		# holding the resources, never delivering and never looking for
+		# new work. Deliver what we have instead of waiting for a full load
+		# that this site can no longer provide.
+		_leave_workplace()
+		current_job = Job.NONE
+		is_delivering = true
+		_continue_delivery()
 		return
 
 	if carried_amount >= carry_capacity:
@@ -248,7 +265,7 @@ func _auto_build(_delta: float) -> void:
 			return
 		site = sites[0]
 
-	if global_position.distance_to(site.global_position) > _interaction_range(site):
+	if global_position.distance_to(site.global_position) > _interaction_range(site) and not has_stalled_near_target():
 		move_to(site.global_position)
 		return
 
@@ -269,6 +286,21 @@ func command_gather(resource_node) -> void:
 	if job == Job.NONE:
 		# e.g. an iron-ore or water node — not hand-gatherable (yet).
 		GameManager.notify("Citizens can't gather that directly.")
+		return
+	if carried_amount > 0:
+		# Holding resources from a previous job (most commonly: that job's
+		# site got depleted, freeing the citizen up without a delivery).
+		# Switching straight into a new job here would silently overwrite
+		# carried_resource on the next harvest, losing the old load with
+		# nothing to show for it. Deliver what we have first; the new
+		# gather order is preserved as a player order and will resume
+		# automatically once delivery completes (see _run_player_order).
+		_leave_workplace()
+		has_player_order = true
+		order_kind = "gather"
+		order_target = resource_node
+		is_delivering = true
+		_continue_delivery()
 		return
 	_leave_workplace()
 	# Resource *buildings* have worker slots; claim one so the building also
@@ -306,7 +338,13 @@ func _job_for_target(node) -> Job:
 
 func command_build(site) -> void:
 	_leave_workplace()
-	_abandon_delivery()
+	# Cargo is NOT dropped here. A move/build order doesn't ask the citizen
+	# to deliver or discard anything — whatever they're carrying just rides
+	# along until a gather order asks them to deliver it (see command_gather)
+	# or they happen to be sent back to the village center while still
+	# is_delivering. Stop the in-progress delivery WALK (so they go build
+	# instead) but keep the cargo itself.
+	is_delivering = false
 	has_player_order = true
 	order_kind = "build"
 	order_target = site
@@ -315,7 +353,9 @@ func command_build(site) -> void:
 
 func command_move(pos: Vector3) -> void:
 	_leave_workplace()
-	_abandon_delivery()
+	# See command_build — cargo persists through a move order; only the
+	# in-progress delivery walk is interrupted, not the resources themselves.
+	is_delivering = false
 	has_player_order = true
 	order_kind = "move"
 	order_target = null
@@ -323,13 +363,35 @@ func command_move(pos: Vector3) -> void:
 	move_to(pos)
 
 
-func _abandon_delivery() -> void:
-	# A direct move/build order takes priority over finishing a delivery —
-	# matches how most RTS games let you redirect a unit immediately, at
-	# the cost of whatever it was carrying.
-	is_delivering = false
-	carried_amount = 0
-	carried_resource = ""
+## Right-clicking the village center while carrying resources (cargo that's
+## been sitting idle since a move/build order, or a delivery already in
+## progress) should deliver it and go back to the work loop — not just walk
+## the citizen there and leave them standing around. If there's a previous
+## workplace still valid, resume working it; otherwise fall back to the
+## normal auto-job search once delivery completes.
+func command_return_to_work() -> void:
+	var previous_workplace = workplace
+	_leave_workplace()
+
+	if carried_amount > 0:
+		has_player_order = false
+		order_kind = ""
+		order_target = null
+		is_delivering = true
+		_resume_workplace_after_delivery = previous_workplace
+		_continue_delivery()
+		return
+
+	# Nothing to deliver — just go straight back to work.
+	stop_special_orders()
+	current_job = Job.NONE
+	if is_instance_valid(previous_workplace) and previous_workplace.has_method("assign_worker") \
+			and previous_workplace.assign_worker(self):
+		workplace = previous_workplace
+		current_job = _job_for_target(previous_workplace)
+		_gather_timer = 0.0
+	else:
+		_try_autofind_job()
 
 
 func stop_special_orders() -> void:
@@ -344,8 +406,15 @@ func _run_player_order(delta: float) -> void:
 			if not is_instance_valid(order_target):
 				stop_special_orders()
 				return
+			if is_delivering:
+				# Delivering a previous load before starting this gather
+				# order (see command_gather's partial-load handoff) —
+				# workplace is intentionally null during this leg, that's
+				# not the same as having given up on the target.
+				_continue_delivery()
+				return
 			_auto_work_job(delta)
-			if workplace == null:
+			if workplace == null and not is_delivering:
 				# _auto_work_job gave up on this target (depleted, or it
 				# stopped being a valid worksite) — release the order so
 				# the citizen goes back to looking for its own work
@@ -364,7 +433,7 @@ func _run_player_order(delta: float) -> void:
 
 func _player_build(_delta: float) -> void:
 	var site = order_target
-	if global_position.distance_to(site.global_position) > _interaction_range(site):
+	if global_position.distance_to(site.global_position) > _interaction_range(site) and not has_stalled_near_target():
 		move_to(site.global_position)
 		return
 	stop()
@@ -383,7 +452,7 @@ func _continue_delivery() -> void:
 		# No village center exists (e.g. it was destroyed) — hold the
 		# resources rather than losing them or getting stuck.
 		return
-	if global_position.distance_to(center.global_position) > _interaction_range(center):
+	if global_position.distance_to(center.global_position) > _interaction_range(center) and not has_stalled_near_target():
 		move_to(center.global_position)
 		return
 	stop()
@@ -397,6 +466,39 @@ func _continue_delivery() -> void:
 	carried_amount = 0
 	carried_resource = ""
 	is_delivering = false
+
+	# command_return_to_work() set this right before starting this delivery —
+	# resume the citizen's previous job at its previous workplace now that
+	# the cargo's been dropped off.
+	if _resume_workplace_after_delivery != null:
+		var prev = _resume_workplace_after_delivery
+		_resume_workplace_after_delivery = null
+		if is_instance_valid(prev) and prev.has_method("assign_worker") and prev.assign_worker(self):
+			workplace = prev
+			current_job = _job_for_target(prev)
+			_gather_timer = 0.0
+		else:
+			_try_autofind_job()
+		return
+
+	# If command_gather queued a new job while we were still carrying a
+	# previous load (see command_gather), workplace was deliberately left
+	# unset until the delivery leg finished. Start the actual job now —
+	# _auto_work_job alone wouldn't pick this up since it bails out as soon
+	# as workplace is null.
+	if has_player_order and order_kind == "gather" and is_instance_valid(order_target) and workplace == null:
+		var site = order_target
+		var job := _job_for_target(site)
+		if job == Job.NONE:
+			stop_special_orders()
+			return
+		if site.has_method("assign_worker") and not site.assign_worker(self):
+			GameManager.notify("That workplace is already full.")
+			stop_special_orders()
+			return
+		workplace = site
+		current_job = job
+		_gather_timer = 0.0
 
 
 func _nearest_in_group(group_name: String):

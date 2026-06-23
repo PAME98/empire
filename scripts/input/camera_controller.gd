@@ -268,6 +268,8 @@ func _issue_order(unit, target, ground: Vector3) -> void:
 		return
 	if target.is_in_group("enemies"):
 		unit.command_attack(target)
+	elif target.is_in_group("village_centers") and unit.has_method("command_return_to_work"):
+		unit.command_return_to_work()
 	elif target.is_in_group("resources"):
 		unit.command_gather(target)
 	elif target.is_in_group("construction_sites"):
@@ -303,9 +305,21 @@ func _confirm_placement() -> void:
 		GameManager.cancel_building_placement()
 		return
 
+	var placement_pos := _ground_point(_mouse())
+
+	# Quarry/mine are deliberately exempt — they're SUPPOSED to sit on a
+	# mountain deposit (checked below via bind_to_deposit). Every other
+	# building must not overlap a river, mountain, or tree; previously
+	# nothing checked this at all, so buildings could be dropped on rivers.
+	var exempt_from_terrain_check :Variant = building_id in ["quarry", "mine"]
+	if not exempt_from_terrain_check and not GameManager.can_place_building_at(placement_pos):
+		GameManager.notify("Can't build there — blocked by terrain (river, mountain, or tree).")
+		GameManager.cancel_building_placement()
+		return
+
 	var building = load(scene_path).instantiate()
 	get_tree().current_scene.get_node("Buildings").add_child(building)
-	building.global_position = _ground_point(_mouse())
+	building.global_position = placement_pos
 
 	if building is ResourceBuilding and building.deposit_group != "":
 		if not building.bind_to_deposit(64.0):
@@ -316,6 +330,13 @@ func _confirm_placement() -> void:
 			return
 
 	GameManager.spend(cost)
+
+	# The navmesh only existed for map-gen obstacles until now — without
+	# this, units would path straight through every player-placed building
+	# (quarry/mine/farm/etc.) since it was never carved out of the mesh.
+	var map_gen = get_tree().current_scene.get_node_or_null("MapGenerator")
+	if map_gen and map_gen.has_method("rebake_navigation"):
+		map_gen.rebake_navigation()
 
 	var builder = GameManager.placement_builder
 	if is_instance_valid(builder) and builder.has_method("command_build"):

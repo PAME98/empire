@@ -303,6 +303,39 @@ func cancel_building_placement() -> void:
 	placement_mode_changed.emit(false, "")
 
 
+## Whoever currently drives the placement ghost (camera_controller.gd /
+## ui_controller.gd — moves PlacementGhost to the mouse's ground raycast hit
+## each frame) should call this before confirming a placement on click.
+## Previously nothing validated placement at all, so buildings could be
+## dropped on top of rivers, mountains, or trees.
+##
+## `footprint_radius` should be roughly half the building's largest XZ
+## dimension (e.g. farm.tscn's 64x64 footprint -> ~36 to include a margin).
+func can_place_building_at(world_pos: Vector3, footprint_radius: float = 36.0) -> bool:
+	var space_state :Variant = Engine.get_main_loop().current_scene.get_world_3d().direct_space_state
+	var query := PhysicsShapeQueryParameters3D.new()
+	var shape := CylinderShape3D.new()
+	shape.radius = footprint_radius
+	shape.height = 40.0
+	query.shape = shape
+	query.transform = Transform3D(Basis.IDENTITY, world_pos)
+	# Layer 1 is where mountains/trees/rivers/buildings all live (their
+	# default StaticBody3D collision_layer). Units are excluded by checking
+	# group membership below so a citizen standing on the spot doesn't block
+	# its own building.
+	query.collision_mask = 1
+
+	var hits :Variant = space_state.intersect_shape(query, 8)
+	for hit in hits:
+		var collider = hit.get("collider")
+		if collider == null:
+			continue
+		if collider.is_in_group("rivers") or collider.is_in_group("mountains") \
+				or collider.is_in_group("resources") or collider.is_in_group("buildings"):
+			return false
+	return true
+
+
 # ---------------------------------------------------------------------------
 # Artillery attack-position targeting mode
 # ---------------------------------------------------------------------------
