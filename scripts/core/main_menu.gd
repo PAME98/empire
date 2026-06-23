@@ -7,10 +7,15 @@ extends Control
 ##   └── VBoxContainer
 ##       ├── Label              "title_label"   — game title
 ##       ├── Label              "subtitle"      — "Select Map Size"
-##       ├── Button             "small_btn"     — Small  (1280 × 720)
-##       ├── Button             "medium_btn"    — Medium (2560 × 1440)
-##       ├── Button             "large_btn"     — Large  (4096 × 2304)
-##       └── Button             "huge_btn"      — Huge   (6144 × 3456)
+##       ├── Button             "small_btn"     — Small  (2560 × 1440)
+##       ├── Button             "medium_btn"    — Medium (5120 × 2880)
+##       ├── Button             "large_btn"     — Large  (8192 × 4608)
+##       └── Button             "huge_btn"      — Huge   (12288 × 6912)
+##
+## NOTE: with the continent/ocean generator, roughly half of each map is open
+## water, so the effective LAND area is about half these figures. Sizes were
+## bumped accordingly so the playable landmass is still "vastly bigger" than
+## the old solid-rectangle maps.
 
 const GAME_SCENE := "res://scenes/core/main.tscn"
 
@@ -21,10 +26,10 @@ const GAME_SCENE := "res://scenes/core/main.tscn"
 
 
 func _ready() -> void:
-	small_btn.pressed.connect(func():  _start(Vector2(1280,  720)))
-	medium_btn.pressed.connect(func(): _start(Vector2(2560, 1440)))
-	large_btn.pressed.connect(func():  _start(Vector2(4096, 2304)))
-	huge_btn.pressed.connect(func():   _start(Vector2(6144, 3456)))
+	small_btn.pressed.connect(func():  _start(Vector2( 2560,  1440)))
+	medium_btn.pressed.connect(func(): _start(Vector2( 5120,  2880)))
+	large_btn.pressed.connect(func():  _start(Vector2( 8192,  4608)))
+	huge_btn.pressed.connect(func():   _start(Vector2(12288,  6912)))
 
 
 func _start(size: Vector2) -> void:

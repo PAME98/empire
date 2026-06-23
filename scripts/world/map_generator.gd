@@ -2,24 +2,67 @@ extends Node
 ## Procedurally generates a map, then enters town-center placement mode.
 ##
 ## STARTUP SEQUENCE:
-##   1. Clear all pre-placed buildings, units, and hand-placed trees from
-##      main.tscn (VillageCenter, House, Citizens, Trees in Resources).
-##   2. Generate rivers → mountains → forests (procedurally).
-##   3. Bake navigation mesh.
-##   4. Enter placement mode: PlacementGhost follows mouse, green = valid,
-##      red = blocked. Left-click places VillageCenter + 5 citizens.
+##   1. Clear pre-placed buildings/units/trees from main.tscn.
+##   2. Build the land mask (continents vs ocean) into a texture.
+##   3. Generate terrain (clipped ground plane + ocean plane + ocean collision)
+##      -> rivers -> mountains -> forests, all constrained to land.
+##   4. Bake navigation mesh.
+##   5. Enter placement mode.
+##
+## CONTINENT / OCEAN APPROACH:
+##   A FastNoiseLite "land value" field, pushed down near the borders by a
+##   radial edge falloff, decides land vs ocean (land where value > SEA_LEVEL).
+##   That field is baked into a mask TEXTURE. The ground is a single shaded
+##   plane whose fragments are discarded below sea level, so the coastline
+##   follows the bilinear-interpolated contour — smooth, rounded edges at pixel
+##   resolution rather than the stair-stepped edge of a tile grid. A sand band
+##   hugs the waterline to read the coast clearly. The ocean is a plane beneath
+##   the ground plane that shows through wherever land is discarded. Gameplay
+##   (mountains/rivers/forests/placement) uses the same CPU land field, and a
+##   coarse cell grid of tall collision boxes carves the sea out of the navmesh.
+##
+## FEATURE REGIONS:
+##   Two low-frequency noises gate WHERE mountains and rivers appear, so the map
+##   has mountain regions and flat regions, river regions and dry regions.
 ##
 ## RIVER APPROACH:
-##   Catmull-Rom spline with a mild single-pass meander (one gentle lateral
-##   offset per control point, alternating side). No secondary sine wave —
-##   that caused the artificial snake look. The river just curves naturally
-##   from edge to edge with 3-5 bends. Overlap is prevented by storing dense
-##   spline samples and checking all of them during mountain/tree placement.
+##   A river starts at an inland high point and flows DOWNHILL along the
+##   negative gradient of the land field until it reaches the coast and spills a
+##   little into the water. Width grows from source to sea.
 
 const VILLAGE_CENTER_SCENE := "res://scenes/buildings/village_center.tscn"
 const CITIZEN_SCENE        := "res://scenes/units/citizen.tscn"
 const TREE_SCENE           := "res://scenes/world/tree.tscn"
 const MOUNTAIN_SCENE       := "res://scenes/world/mountain.tscn"
+
+# ---------------------------------------------------------------------------
+# Continents / ocean
+# ---------------------------------------------------------------------------
+## Noise frequency in world units. SMALLER => larger, fewer continents.
+const CONTINENT_NOISE_FREQ   := 0.00035
+const CONTINENT_OCTAVES      := 4
+## Land where land_value > SEA_LEVEL. Raise => more ocean / smaller land.
+const SEA_LEVEL              := 0.46
+## Radial edge falloff: where ocean starts to win, and how hard it pushes the
+## borders under water. Keeps a clean coast ring around the playable area.
+const EDGE_FALLOFF_START     := 0.55
+const EDGE_FALLOFF_STRENGTH  := 1.15
+
+## Heights. Ground plane sits at GROUND_Y; ocean surface a touch below so it
+## shows through the discarded coast and never floods flat land.
+const GROUND_Y               := 0.0
+const OCEAN_Y                := -0.5
+## Ocean collision box height. Must exceed agent_max_climb so the baker
+## excludes ocean from the walkable mesh.
+const OCEAN_COLLIDER_HEIGHT  := 60.0
+## Cell size for ocean collision boxes (gameplay coastline). Independent of the
+## visual coast, which is smooth. Smaller => tighter shoreline collision.
+const OCEAN_COLLISION_CELL   := 64.0
+
+## Land mask texture resolution. LOWER target res = smoother/rounder coasts
+## (bilinear interpolation does the rounding). Capped so huge maps stay cheap.
+const LAND_MASK_TEXEL        := 26.0
+const LAND_MASK_MAX_DIM      := 720
 
 # ---------------------------------------------------------------------------
 # Forests
@@ -39,76 +82,74 @@ const MIN_OBSTACLE_GAP := NAV_AGENT_RADIUS * 2.0 + 8.0
 # ---------------------------------------------------------------------------
 # Mountains
 # ---------------------------------------------------------------------------
-const MOUNTAIN_RANGES_PER_MPX := 4.0
-const MOUNTAINS_PER_RANGE_MIN := 6
-const MOUNTAINS_PER_RANGE_MAX := 16
-const MOUNTAIN_SPREAD         := 66.0
+const MOUNTAIN_RANGES_PER_MPX := 2.0
+const MOUNTAINS_PER_RANGE_MIN := 4
+const MOUNTAINS_PER_RANGE_MAX := 9
+const MOUNTAIN_SPREAD         := 140.0
 const MOUNTAIN_STONE_MIN      := 400
 const MOUNTAIN_STONE_MAX      := 900
 const IRON_MOUNTAIN_CHANCE    := 0.35
 const MOUNTAIN_IRON_MIN       := 150
 const MOUNTAIN_IRON_MAX       := 450
-const MOUNTAIN_RADIUS         := 45.0
+## Overlap radius. Larger now that mountains have wider footprints.
+const MOUNTAIN_RADIUS         := 95.0
+## Per-instance scaling. mountain.tscn is ~72 x 60 x 56. Low Y, wide XZ:
+## broad massifs that cover area rather than tall spires.
+const MOUNTAIN_SCALE_Y_MIN    := 1.0
+const MOUNTAIN_SCALE_Y_MAX    := 1.7
+const MOUNTAIN_SCALE_XZ_MIN   := 2.2
+const MOUNTAIN_SCALE_XZ_MAX   := 3.4
+## Mountain regions: higher threshold => rarer, fewer mountainous areas.
+const MOUNTAIN_REGION_FREQ      := 0.0009
+const MOUNTAIN_REGION_THRESHOLD := 0.60
 
 # ---------------------------------------------------------------------------
 # Rivers
 # ---------------------------------------------------------------------------
 const RIVER_COUNT_MIN    := 1
-const RIVER_COUNT_MAX    := 2   # reduced from 3 — rivers are wide, 2 is plenty
-
-const RIVER_WIDTH_MIN    := 60.0
-const RIVER_WIDTH_MAX    := 140.0
-const RIVER_TAPER_RATIO  := 0.42  # ends taper to this fraction of peak width
-
-## Number of interior bend points. 3-4 gives natural single-direction curves
-## without the snake look. Each point alternates left/right of the main axis.
-const RIVER_CONTROL_POINTS := 4
-
-## Max lateral displacement per control point, as fraction of shorter map axis.
-## 0.16 gives gentle bends. Raise only if you want more dramatic curves.
-const RIVER_WANDER       := 0.16
-
-## Spline samples for mesh + collision. 100 is smooth without being heavy.
-const RIVER_SAMPLES      := 100
-
-## Store every Nth sample in _river_points for obstacle rejection.
-## Lower = more accurate rejection boundary.
+const RIVER_COUNT_MAX    := 4
+const RIVER_WIDTH_MIN    := 45.0
+const RIVER_WIDTH_MAX    := 95.0
+const RIVER_SOURCE_WIDTH_RATIO := 0.42
+const RIVER_SOURCE_MIN_VALUE := SEA_LEVEL + 0.14
+const RIVER_REGION_FREQ      := 0.0007
+const RIVER_REGION_THRESHOLD := 0.50
+const RIVER_MARCH_STEP       := 70.0
+const RIVER_MARCH_MAX_STEPS  := 240
+const RIVER_DECIMATE_STEP    := 4
+const RIVER_SAMPLES      := 120
 const RIVER_REJECT_STEP  := 2
-
-## Clearance kept between rivers and any other obstacle.
 const RIVER_CLEAR_RADIUS := RIVER_WIDTH_MAX * 0.5 + MIN_OBSTACLE_GAP
-
-## How far apart two rivers must be at their closest sample points.
-## Prevents rivers merging visually or spawning right next to each other.
 const RIVER_MIN_SEPARATION := RIVER_WIDTH_MAX + 80.0
-
-const RIVER_Y := 0.3   # water surface height; raise slightly if it sinks into ground
-
-# ---------------------------------------------------------------------------
-# Ground
-# ---------------------------------------------------------------------------
-const GROUND_TILE_SCENE := "res://assets/kenney/nature/models/ground_grass.glb"
-const GROUND_TILE_SCALE := 100.0
+const RIVER_Y := 0.10
+## Mouth handling: extra downhill steps past the coast so the mouth sits in the
+## sea, and the land_value span over which the river surface drops to sea level.
+const RIVER_MOUTH_STEPS := 5
+const RIVER_MOUTH_DROP  := 0.22
+## Steps used to confirm a river's mouth reaches open ocean (not an inland lake).
+const OCEAN_CHECK_STEPS := 90
 
 # ---------------------------------------------------------------------------
 # Placement
 # ---------------------------------------------------------------------------
-## Radius cleared around the town center placement spot.
 const SPAWN_SAFE_RADIUS := 200.0
-## Citizens spawn in a ring at this radius from the town center.
 const CITIZEN_SPAWN_RADIUS := 90.0
 const CITIZEN_COUNT        := 5
 
 # ---------------------------------------------------------------------------
 # Internal
 # ---------------------------------------------------------------------------
-var _rng              := RandomNumberGenerator.new()
-var _map_rect         : Rect2
-var _center           : Vector2
+var _rng                   := RandomNumberGenerator.new()
+var _continent_noise       := FastNoiseLite.new()
+var _mountain_region_noise := FastNoiseLite.new()
+var _river_region_noise    := FastNoiseLite.new()
+var _land_mask_tex         : ImageTexture
+var _map_rect              : Rect2
+var _center                : Vector2
 
-## Dense river sample positions — used for accurate obstacle rejection.
-var _river_samples_all : Array[Vector2] = []   # every sample from every river
-var _river_points      : Array[Vector2] = []   # subsampled (every RIVER_REJECT_STEP)
+var _river_samples_all : Array[Vector2] = []
+var _river_points      : Array[Vector2] = []
+var _river_sources     : Array[Vector2] = []
 var _mountain_points   : Array[Vector2] = []
 var _tree_points       : Array[Vector2] = []
 
@@ -122,8 +163,10 @@ func _ready() -> void:
 	_map_rect = Rect2(Vector2.ZERO, size)
 	_center   = size * 0.5
 
+	_configure_noises()
+
 	_clear_prebuilt_nodes()
-	_resize_ground(size)
+	_generate_terrain(size)
 	_generate_rivers()
 	_generate_mountain_ranges()
 	_generate_forests()
@@ -132,126 +175,430 @@ func _ready() -> void:
 	_begin_placement()
 
 
+func _configure_noises() -> void:
+	_continent_noise.seed = _rng.randi()
+	_continent_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	_continent_noise.frequency = CONTINENT_NOISE_FREQ
+	_continent_noise.fractal_type = FastNoiseLite.FRACTAL_FBM
+	_continent_noise.fractal_octaves = CONTINENT_OCTAVES
+
+	_mountain_region_noise.seed = _rng.randi()
+	_mountain_region_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	_mountain_region_noise.frequency = MOUNTAIN_REGION_FREQ
+
+	_river_region_noise.seed = _rng.randi()
+	_river_region_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	_river_region_noise.frequency = RIVER_REGION_FREQ
+
+
+# ---------------------------------------------------------------------------
+# Land mask + feature regions
+# ---------------------------------------------------------------------------
+func _land_value(pos: Vector2) -> float:
+	var n := _continent_noise.get_noise_2d(pos.x, pos.y) * 0.5 + 0.5
+	return n - _edge_falloff(pos)
+
+
+func _edge_falloff(pos: Vector2) -> float:
+	var nx := absf(pos.x / _map_rect.size.x * 2.0 - 1.0)
+	var ny := absf(pos.y / _map_rect.size.y * 2.0 - 1.0)
+	var d  := maxf(nx, ny)
+	return smoothstep(EDGE_FALLOFF_START, 1.0, d) * EDGE_FALLOFF_STRENGTH
+
+
+func _is_land(pos: Vector2) -> bool:
+	return _land_value(pos) > SEA_LEVEL
+
+
+func _mountain_region(pos: Vector2) -> float:
+	return _mountain_region_noise.get_noise_2d(pos.x, pos.y) * 0.5 + 0.5
+
+
+func _river_region(pos: Vector2) -> float:
+	return _river_region_noise.get_noise_2d(pos.x, pos.y) * 0.5 + 0.5
+
+
+func _land_gradient(pos: Vector2) -> Vector2:
+	var e := 24.0
+	var dx := _land_value(pos + Vector2(e, 0.0)) - _land_value(pos - Vector2(e, 0.0))
+	var dy := _land_value(pos + Vector2(0.0, e)) - _land_value(pos - Vector2(0.0, e))
+	return Vector2(dx, dy)
+
+
+func _random_land_point(min_value: float = SEA_LEVEL, tries: int = 60) -> Variant:
+	for _i in tries:
+		var p := Vector2(
+			_rng.randf_range(_map_rect.position.x, _map_rect.end.x),
+			_rng.randf_range(_map_rect.position.y, _map_rect.end.y)
+		)
+		if _land_value(p) > min_value:
+			return p
+	return null
+
+
 # ---------------------------------------------------------------------------
 # Clear pre-placed nodes from main.tscn
 # ---------------------------------------------------------------------------
 func _clear_prebuilt_nodes() -> void:
 	var scene := get_tree().current_scene
-
-	# Remove all children of Buildings (VillageCenter, House, …)
-	var buildings := scene.get_node_or_null("Buildings")
-	if buildings:
-		for child in buildings.get_children():
-			child.queue_free()
-
-	# Remove all children of Units (pre-placed citizens)
-	var units := scene.get_node_or_null("Units")
-	if units:
-		for child in units.get_children():
-			child.queue_free()
-
-	# Remove hand-placed trees/resources (MapGenerator will re-add them procedurally)
-	var resources := scene.get_node_or_null("Resources")
-	if resources:
-		for child in resources.get_children():
-			child.queue_free()
+	for group_name in ["Buildings", "Units", "Resources"]:
+		var n := scene.get_node_or_null(group_name)
+		if n:
+			for child in n.get_children():
+				child.queue_free()
 
 
 # ---------------------------------------------------------------------------
-# Ground
+# Terrain: clipped ground plane + ocean plane + ocean collision
 # ---------------------------------------------------------------------------
-func _resize_ground(size: Vector2) -> void:
+func _generate_terrain(size: Vector2) -> void:
 	var scene  := get_tree().current_scene
 	var ground := scene.get_node_or_null("Ground")
-	if ground == null:
-		push_warning("MapGenerator: no Ground node found.")
-		return
 	if ground is MeshInstance3D:
 		ground.mesh    = null
 		ground.visible = false
 
-	var packed := load(GROUND_TILE_SCENE) as PackedScene
-	if packed == null:
-		push_warning("MapGenerator: could not load " + GROUND_TILE_SCENE)
-		return
+	_land_mask_tex = _build_land_mask_texture(size)
+	_build_ground_plane(size)
+	_build_ocean_plane(size)
+	_build_ocean_collision(size)
 
-	var cols      := int(ceil(size.x / GROUND_TILE_SCALE))
-	var rows      := int(ceil(size.y / GROUND_TILE_SCALE))
-	var container := Node3D.new()
-	container.name = "GroundTiles"
 
+## Bake the continuous land field into an RF texture. Bilinear sampling of this
+## in the ground shader is what makes the coastline a smooth curve.
+func _build_land_mask_texture(size: Vector2) -> ImageTexture:
+	var w := clampi(int(round(size.x / LAND_MASK_TEXEL)), 64, LAND_MASK_MAX_DIM)
+	var h := clampi(int(round(size.y / LAND_MASK_TEXEL)), 64, LAND_MASK_MAX_DIM)
+	var img := Image.create(w, h, false, Image.FORMAT_RF)
+	for y in h:
+		var wy := (y + 0.5) / float(h) * size.y
+		for x in w:
+			var wx := (x + 0.5) / float(w) * size.x
+			img.set_pixel(x, y, Color(_land_value(Vector2(wx, wy)), 0.0, 0.0))
+	return ImageTexture.create_from_image(img)
+
+
+func _build_ground_plane(size: Vector2) -> void:
+	var plane := PlaneMesh.new()
+	plane.size = size
+	var mi := MeshInstance3D.new()
+	mi.name = "GroundPlane"
+	mi.mesh = plane
+	mi.position = Vector3(_center.x, GROUND_Y, _center.y)
+	mi.material_override = _make_ground_material()
+	get_tree().current_scene.add_child.call_deferred(mi)
+
+
+func _build_ocean_plane(size: Vector2) -> void:
+	var plane := PlaneMesh.new()
+	plane.size = size
+	var mi := MeshInstance3D.new()
+	mi.name = "OceanSurface"
+	mi.mesh = plane
+	mi.position = Vector3(_center.x, OCEAN_Y, _center.y)
+	mi.material_override = _make_ocean_material()
+	get_tree().current_scene.add_child.call_deferred(mi)
+
+
+func _make_ground_material() -> ShaderMaterial:
+	# Single shaded ground plane. Fragments below sea level are discarded so the
+	# coast follows the bilinear mask contour (rounded). A sand band hugs the
+	# waterline; two value-noise octaves break up the grass colour.
+	var code := """
+shader_type spatial;
+render_mode cull_disabled, diffuse_lambert;
+
+uniform sampler2D land_mask : filter_linear, repeat_disable;
+uniform vec2  world_size;
+uniform float sea_level     = 0.46;
+uniform float coast_feather = 0.010;
+uniform float beach_band    = 0.030;
+uniform vec3  grass_low  : source_color = vec3(0.28, 0.45, 0.17);
+uniform vec3  grass_high : source_color = vec3(0.44, 0.60, 0.27);
+uniform vec3  sand_col   : source_color = vec3(0.78, 0.71, 0.47);
+
+varying vec3 v_world;
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+float vnoise(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	float a = hash(i);
+	float b = hash(i + vec2(1.0, 0.0));
+	float c = hash(i + vec2(0.0, 1.0));
+	float d = hash(i + vec2(1.0, 1.0));
+	vec2 u = f * f * (3.0 - 2.0 * f);
+	return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+void vertex() {
+	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
+
+void fragment() {
+	vec2 muv = v_world.xz / world_size;
+	float lv = texture(land_mask, muv).r;
+	if (lv < sea_level - coast_feather) {
+		discard;
+	}
+	float n  = vnoise(v_world.xz * 0.030);
+	float n2 = vnoise(v_world.xz * 0.008);
+	vec3 grass = mix(grass_low, grass_high, n * 0.6 + n2 * 0.4);
+
+	float beach = 1.0 - smoothstep(sea_level, sea_level + beach_band, lv);
+	ALBEDO    = mix(grass, sand_col, beach);
+	ROUGHNESS = 1.0;
+	SPECULAR  = 0.0;
+}
+"""
+	var sh := Shader.new()
+	sh.code = code
+	var mat := ShaderMaterial.new()
+	mat.shader = sh
+	mat.set_shader_parameter("land_mask", _land_mask_tex)
+	mat.set_shader_parameter("world_size", _map_rect.size)
+	mat.set_shader_parameter("sea_level", SEA_LEVEL)
+	return mat
+
+
+func _make_ocean_material() -> ShaderMaterial:
+	var code := """
+shader_type spatial;
+render_mode cull_disabled, diffuse_lambert, specular_schlick_ggx;
+
+uniform vec4  deep_col    : source_color = vec4(0.03, 0.12, 0.30, 1.0);
+uniform vec4  shallow_col : source_color = vec4(0.08, 0.30, 0.55, 1.0);
+uniform vec4  sky_col     : source_color = vec4(0.58, 0.74, 0.88, 1.0);
+uniform float speed       : hint_range(0.02, 1.0) = 0.16;
+
+varying vec3 v_world;
+
+void vertex() {
+	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
+
+void fragment() {
+	float t = TIME * speed;
+	vec2  p = v_world.xz * 0.01;
+
+	float r1 = sin(p.x * 1.6 + t * 1.3);
+	float r2 = sin(p.y * 1.3 - t * 1.1 + 1.0);
+	float r3 = sin((p.x + p.y) * 0.9 + t * 0.7);
+	float ripple = (r1 + r2 + r3) / 3.0;
+	float tone   = ripple * 0.5 + 0.5;
+
+	vec3 base = mix(deep_col.rgb, shallow_col.rgb, tone * 0.55);
+	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 4.0);
+	base = mix(base, sky_col.rgb, fres * 0.55);
+	float glint = smoothstep(0.82, 1.0, ripple);
+
+	ALBEDO    = base;
+	EMISSION  = sky_col.rgb * glint * 0.20;
+	ROUGHNESS = 0.06;
+	METALLIC  = 0.0;
+	SPECULAR  = 0.80;
+}
+"""
+	var sh := Shader.new()
+	sh.code = code
+	var mat := ShaderMaterial.new()
+	mat.shader = sh
+	return mat
+
+
+func _build_ocean_collision(size: Vector2) -> void:
+	var cell := OCEAN_COLLISION_CELL
+	var cols := int(ceil(size.x / cell))
+	var rows := int(ceil(size.y / cell))
+
+	var ocean_set := {}
 	for row in rows:
 		for col in cols:
-			var tile: Node3D = packed.instantiate()
-			tile.scale    = Vector3.ONE * GROUND_TILE_SCALE
-			tile.position = Vector3(
-				col * GROUND_TILE_SCALE + GROUND_TILE_SCALE * 0.5,
-				-0.1,
-				row * GROUND_TILE_SCALE + GROUND_TILE_SCALE * 0.5
-			)
-			container.add_child(tile)
+			var c := Vector2(col * cell + cell * 0.5, row * cell + cell * 0.5)
+			if not _is_land(c):
+				ocean_set[Vector2i(col, row)] = true
+	if ocean_set.is_empty():
+		return
 
-	scene.add_child.call_deferred(container)
+	var body := StaticBody3D.new()
+	body.name = "OceanBody"
+	body.collision_layer = 1
+	body.collision_mask  = 0
+	body.add_to_group("obstacles")
+	body.add_to_group("ocean")
+
+	for row in rows:
+		var run_start := -1
+		for col in range(cols + 1):
+			var is_ocean := col < cols and ocean_set.has(Vector2i(col, row))
+			if is_ocean and run_start == -1:
+				run_start = col
+			elif not is_ocean and run_start != -1:
+				_add_ocean_box(body, run_start, col - 1, row, cell)
+				run_start = -1
+
+	get_tree().current_scene.add_child.call_deferred(body)
+
+
+func _add_ocean_box(body: StaticBody3D, col_start: int, col_end: int, row: int, cell: float) -> void:
+	var span  := (col_end - col_start + 1)
+	var width := span * cell
+	var cx    := (col_start * cell) + width * 0.5
+	var cz    := (row * cell) + cell * 0.5
+
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(width, OCEAN_COLLIDER_HEIGHT, cell)
+	var col := CollisionShape3D.new()
+	col.shape = shape
+	col.position = Vector3(cx, OCEAN_COLLIDER_HEIGHT * 0.5 - 1.0, cz)
+	body.add_child(col)
 
 
 # ---------------------------------------------------------------------------
-# Rivers
+# Rivers — inland source -> coast, gated by river region
 # ---------------------------------------------------------------------------
 func _generate_rivers() -> void:
 	var resources := _get_or_create("Resources")
 	var count     := _rng.randi_range(RIVER_COUNT_MIN, RIVER_COUNT_MAX)
 	for _i in count:
 		var base_width := _rng.randf_range(RIVER_WIDTH_MIN, RIVER_WIDTH_MAX)
-		var ctrl       := _make_river_control_points()
+		var ctrl       := _make_river_to_sea()
 		if ctrl.is_empty():
 			continue
 		_place_river(ctrl, base_width, resources)
 
 
-## Builds control points for one river. Returns empty array if no valid
-## pair of edges can be found far enough from existing rivers.
-func _make_river_control_points() -> Array[Vector2]:
-	# Try a few random edge pairs; reject if the midpoint is too close to
-	# an existing river (rough early-rejection before full sample check).
-	for _attempt in 8:
-		var edge_a := _rng.randi() % 4
-		var edge_b := (edge_a + 1 + _rng.randi() % 3) % 4
-		var p_start := _point_on_edge(edge_a)
-		var p_end   := _point_on_edge(edge_b)
-		var midpt   := (p_start + p_end) * 0.5
+func _make_river_to_sea() -> Array[Vector2]:
+	for _attempt in 32:
+		var src_v = _random_land_point(RIVER_SOURCE_MIN_VALUE)
+		if src_v == null:
+			continue
+		var src: Vector2 = src_v
 
-		# Early-reject if midpoint lands on an existing river.
-		if _overlaps_river_raw(midpt, RIVER_MIN_SEPARATION):
+		if _river_region(src) < RIVER_REGION_THRESHOLD:
 			continue
 
-		# Build alternating-side control points for a natural single-curve path.
-		var flow := (p_end - p_start).normalized()
-		var perp := Vector2(-flow.y, flow.x)
-		var max_d := minf(_map_rect.size.x, _map_rect.size.y) * RIVER_WANDER
+		var too_close := false
+		for s in _river_sources:
+			if src.distance_to(s) < RIVER_MIN_SEPARATION:
+				too_close = true
+				break
+		if too_close:
+			continue
 
-		var pts: Array[Vector2] = [p_start]
-		var sign := 1.0 if _rng.randf() > 0.5 else -1.0
-		for i in RIVER_CONTROL_POINTS:
-			var t    := (i + 1.0) / (RIVER_CONTROL_POINTS + 1.0)
-			var base := p_start.lerp(p_end, t)
-			# Scale displacement by a bell so ends stay near the edge entry points.
-			var bell := sin(PI * t)
-			var disp := _rng.randf_range(max_d * 0.5, max_d) * sign * bell
-			sign = -sign
-			pts.append(base + perp * disp)
-		pts.append(p_end)
-		return pts
+		var path := _march_to_sea(src)
+		if path.size() < 3:
+			continue
+		path = _smooth_path(path, 3)
+		var ctrl := _decimate(path, RIVER_DECIMATE_STEP)
+		if ctrl.size() < 3:
+			continue
+		if _polyline_self_intersects(ctrl):
+			continue
+		# All rivers must reach open ocean — reject ones that dead-end in a lake.
+		if not _is_open_ocean(ctrl[ctrl.size() - 1]):
+			continue
+		_river_sources.append(src)
+		return ctrl
+	return []
+
+
+## True if downhill water from `pos` runs off the map edge (open ocean) rather
+## than dead-ending in an enclosed inland basin (a lake).
+func _is_open_ocean(pos: Vector2) -> bool:
+	var p := pos
+	for _k in OCEAN_CHECK_STEPS:
+		if p.x <= _map_rect.position.x or p.x >= _map_rect.end.x \
+				or p.y <= _map_rect.position.y or p.y >= _map_rect.end.y:
+			return true
+		if _land_value(p) > SEA_LEVEL:
+			return false
+		var g := -_land_gradient(p)
+		if g.length() < 0.000001:
+			return false
+		p += g.normalized() * (RIVER_MARCH_STEP * 1.5)
+	return false
+
+
+func _march_to_sea(start: Vector2) -> Array[Vector2]:
+	var pts: Array[Vector2] = [start]
+	var pos := start
+	var prev_dir := Vector2.ZERO
+	var sea_steps := 0
+
+	for _step in RIVER_MARCH_MAX_STEPS:
+		var down := -_land_gradient(pos)
+		if down.length() < 0.00001:
+			down = prev_dir if prev_dir != Vector2.ZERO \
+				else Vector2.RIGHT.rotated(_rng.randf() * TAU)
+		down = down.normalized()
+
+		if prev_dir != Vector2.ZERO:
+			down = (down * 0.78 + prev_dir * 0.22).normalized()
+		down = down.rotated(_rng.randf_range(-0.14, 0.14))
+		prev_dir = down
+
+		pos += down * RIVER_MARCH_STEP
+		var on_border := pos.x <= _map_rect.position.x or pos.x >= _map_rect.end.x \
+				or pos.y <= _map_rect.position.y or pos.y >= _map_rect.end.y
+		pos.x = clampf(pos.x, _map_rect.position.x, _map_rect.end.x)
+		pos.y = clampf(pos.y, _map_rect.position.y, _map_rect.end.y)
+		pts.append(pos)
+
+		# Once in water keep going a few steps so the mouth sits in the sea.
+		if _land_value(pos) <= SEA_LEVEL:
+			sea_steps += 1
+			if sea_steps >= RIVER_MOUTH_STEPS:
+				return pts
+
+		# Running off the border means we've reached open ocean.
+		if on_border:
+			return pts
 
 	return []
 
 
-func _point_on_edge(edge: int) -> Vector2:
-	var s := _map_rect.size
-	match edge:
-		0: return Vector2(_rng.randf_range(s.x * 0.15, s.x * 0.85), 0.0)
-		1: return Vector2(_rng.randf_range(s.x * 0.15, s.x * 0.85), s.y)
-		2: return Vector2(0.0, _rng.randf_range(s.y * 0.15, s.y * 0.85))
-		_: return Vector2(s.x,  _rng.randf_range(s.y * 0.15, s.y * 0.85))
+func _decimate(pts: Array[Vector2], step: int) -> Array[Vector2]:
+	var out: Array[Vector2] = []
+	for i in pts.size():
+		if i % step == 0:
+			out.append(pts[i])
+	if out.is_empty() or out[out.size() - 1] != pts[pts.size() - 1]:
+		out.append(pts[pts.size() - 1])
+	return out
+
+
+## Laplacian smoothing — averages each interior point with its neighbours to
+## relax kinks out of the marched path while keeping the endpoints pinned.
+func _smooth_path(pts: Array[Vector2], iterations: int) -> Array[Vector2]:
+	var p := pts
+	for _it in iterations:
+		if p.size() < 3:
+			return p
+		var out: Array[Vector2] = [p[0]]
+		for i in range(1, p.size() - 1):
+			out.append(p[i - 1] * 0.25 + p[i] * 0.5 + p[i + 1] * 0.25)
+		out.append(p[p.size() - 1])
+		p = out
+	return p
+
+
+func _ccw(a: Vector2, b: Vector2, c: Vector2) -> bool:
+	return (c.y - a.y) * (b.x - a.x) > (b.y - a.y) * (c.x - a.x)
+
+
+func _seg_intersect(a: Vector2, b: Vector2, c: Vector2, d: Vector2) -> bool:
+	return _ccw(a, c, d) != _ccw(b, c, d) and _ccw(a, b, c) != _ccw(a, b, d)
+
+
+## True if the open polyline crosses itself (ignores adjacent segments).
+func _polyline_self_intersects(pts: Array[Vector2]) -> bool:
+	var n := pts.size()
+	for i in range(n - 1):
+		for j in range(i + 2, n - 1):
+			if _seg_intersect(pts[i], pts[i + 1], pts[j], pts[j + 1]):
+				return true
+	return false
 
 
 func _catmull_rom(pts: Array[Vector2], t: float) -> Vector2:
@@ -273,111 +620,128 @@ func _catmull_rom(pts: Array[Vector2], t: float) -> Vector2:
 
 
 func _river_width_at(t: float, base: float) -> float:
-	return base * (RIVER_TAPER_RATIO + (1.0 - RIVER_TAPER_RATIO) * sin(PI * t))
+	return base * lerpf(RIVER_SOURCE_WIDTH_RATIO, 1.0, smoothstep(0.0, 1.0, t))
 
 
 func _place_river(ctrl: Array[Vector2], base_width: float, resources: Node3D) -> void:
 	var container    := Node3D.new()
 	container.name    = "River"
-	var local_samples : Array[Vector2] = []
+	var samples : Array[Vector2] = []
 
-	# Sample the spline.
 	for i in (RIVER_SAMPLES + 1):
 		var t   := float(i) / RIVER_SAMPLES
 		var pos := _catmull_rom(ctrl, t)
 		pos.x    = clampf(pos.x, _map_rect.position.x, _map_rect.end.x)
 		pos.y    = clampf(pos.y, _map_rect.position.y, _map_rect.end.y)
-		local_samples.append(pos)
+		samples.append(pos)
 		_river_samples_all.append(pos)
 		if i % RIVER_REJECT_STEP == 0:
 			_river_points.append(pos)
 
-	# Ribbon mesh.
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	# Single soft-edged water ribbon (edges fade into the terrain in-shader).
+	container.add_child(_build_river_ribbon(
+		samples, base_width, _make_water_material()))
 
-	for i in local_samples.size():
-		var t    := float(i) / (local_samples.size() - 1)
-		var pos  := local_samples[i]
-		var half := _river_width_at(t, base_width) * 0.5
-
-		var tangent: Vector2
-		if i == 0:
-			tangent = (local_samples[1] - local_samples[0]).normalized()
-		elif i == local_samples.size() - 1:
-			tangent = (local_samples[i] - local_samples[i - 1]).normalized()
-		else:
-			tangent = (local_samples[i + 1] - local_samples[i - 1]).normalized()
-		var perp := Vector2(-tangent.y, tangent.x)
-
-		st.set_normal(Vector3.UP)
-		st.set_uv(Vector2(0.0, t))
-		st.add_vertex(Vector3(pos.x - perp.x * half, RIVER_Y, pos.y - perp.y * half))
-		st.set_normal(Vector3.UP)
-		st.set_uv(Vector2(1.0, t))
-		st.add_vertex(Vector3(pos.x + perp.x * half, RIVER_Y, pos.y + perp.y * half))
-
-	var vc := local_samples.size() * 2
-	for i in range(0, vc - 2, 2):
-		st.add_index(i);     st.add_index(i + 1); st.add_index(i + 2)
-		st.add_index(i + 1); st.add_index(i + 3); st.add_index(i + 2)
-
-	var mi              := MeshInstance3D.new()
-	mi.mesh              = st.commit()
-	mi.material_override = _make_water_material()
-	container.add_child(mi)
-
-	# Collision chain.
-	for i in range(1, local_samples.size()):
-		var w := (_river_width_at(float(i-1)/local_samples.size(), base_width) +
-				  _river_width_at(float(i)  /local_samples.size(), base_width)) * 0.5
+	# Collision chain (water width).
+	for i in range(1, samples.size()):
+		var w := (_river_width_at(float(i - 1) / samples.size(), base_width) +
+				  _river_width_at(float(i)     / samples.size(), base_width)) * 0.5
 		container.add_child(RiverSegment.build_segment(
-			_to3(local_samples[i - 1]), _to3(local_samples[i]), w))
+			_to3(samples[i - 1]), _to3(samples[i]), w))
 
 	resources.add_child(container)
 
 
+## Builds one ribbon mesh that follows `samples`. UV.x spans the width (0..1),
+## UV.y runs along the length so the water shader can flow along it. Surface
+## height ramps down to sea level wherever the river is over water (the mouth).
+func _build_river_ribbon(samples: Array[Vector2], base_width: float,
+		mat: Material) -> MeshInstance3D:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var n := samples.size()
+
+	for i in n:
+		var t    := float(i) / (n - 1)
+		var pos  := samples[i]
+		var half := _river_width_at(t, base_width) * 0.5
+		var py   := _river_surface_y(pos)
+
+		var tangent: Vector2
+		if i == 0:
+			tangent = (samples[1] - samples[0]).normalized()
+		elif i == n - 1:
+			tangent = (samples[i] - samples[i - 1]).normalized()
+		else:
+			tangent = (samples[i + 1] - samples[i - 1]).normalized()
+		var perp := Vector2(-tangent.y, tangent.x)
+
+		st.set_normal(Vector3.UP)
+		st.set_uv(Vector2(0.0, t))
+		st.add_vertex(Vector3(pos.x - perp.x * half, py, pos.y - perp.y * half))
+		st.set_normal(Vector3.UP)
+		st.set_uv(Vector2(1.0, t))
+		st.add_vertex(Vector3(pos.x + perp.x * half, py, pos.y + perp.y * half))
+
+	var vc := n * 2
+	for i in range(0, vc - 2, 2):
+		st.add_index(i);     st.add_index(i + 1); st.add_index(i + 2)
+		st.add_index(i + 1); st.add_index(i + 3); st.add_index(i + 2)
+
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	mi.material_override = mat
+	return mi
+
+
+## River surface height: RIVER_Y over land, ramping down to ~ocean level as the
+## river crosses into the sea so the mouth meets the water instead of floating.
+func _river_surface_y(pos: Vector2) -> float:
+	var lv := _land_value(pos)
+	if lv >= SEA_LEVEL:
+		return RIVER_Y
+	var k := clampf((SEA_LEVEL - lv) / RIVER_MOUTH_DROP, 0.0, 1.0)
+	return lerpf(RIVER_Y, OCEAN_Y + 0.02, k)
+
+
 func _make_water_material() -> ShaderMaterial:
-	# Clean, readable water: two scrolling diagonal ripple layers blended
-	# together, darker in the centre, foam at the banks. No normal hacks —
-	# just pure colour so it reads well from the isometric camera distance.
+	# Soft-edged flowing river: deep centre, shallow toward the banks, a foam
+	# band just inboard of the edge, and the very edge faded to zero alpha so the
+	# river dissolves into the terrain instead of ending on a hard rim.
 	var code := """
 shader_type spatial;
-render_mode blend_mix, depth_draw_opaque, cull_disabled, diffuse_lambert, specular_schlick_ggx;
+render_mode blend_mix, cull_disabled, diffuse_lambert, specular_schlick_ggx;
 
-uniform vec4  deep_col    : source_color = vec4(0.07, 0.22, 0.50, 0.94);
-uniform vec4  shallow_col : source_color = vec4(0.22, 0.54, 0.78, 0.86);
-uniform vec4  foam_col    : source_color = vec4(0.86, 0.95, 1.00, 0.80);
-uniform float speed       : hint_range(0.1, 2.0) = 0.45;
-uniform float scale       : hint_range(0.5, 6.0) = 1.8;
-uniform float foam_w      : hint_range(0.0, 0.35) = 0.13;
+uniform vec4  deep_col    : source_color = vec4(0.07, 0.26, 0.48, 0.92);
+uniform vec4  shallow_col : source_color = vec4(0.24, 0.54, 0.74, 0.85);
+uniform vec4  foam_col    : source_color = vec4(0.92, 0.97, 1.00, 0.90);
+uniform float speed       : hint_range(0.1, 2.0) = 0.5;
 
 void fragment() {
-	vec2  uv   = UV;
 	float t    = TIME * speed;
+	float bank = abs(UV.x - 0.5) * 2.0;          // 0 centre .. 1 edge
 
-	// Two diagonal ripple layers at different angles and speeds.
-	float r1 = sin((uv.y * scale * 6.0 + uv.x * scale * 1.5) + t * 2.0) * 0.5 + 0.5;
-	float r2 = sin((uv.y * scale * 4.2 - uv.x * scale * 2.8) - t * 1.3 + 2.0) * 0.5 + 0.5;
-	float rip = r1 * 0.6 + r2 * 0.4;
+	float rip  = sin(UV.y * 20.0 - t * 2.0) * 0.5 + 0.5;
+	float flow = sin((UV.y * 26.0 - t * 2.2) + UV.x * 4.0) * 0.5 + 0.5;
 
-	// Blend deep (centre) → shallow (bank) based on distance from uv.x = 0.5.
-	float bank  = abs(uv.x - 0.5) * 2.0;
-	vec4  water = mix(deep_col, shallow_col, pow(bank, 1.6));
+	vec4 water = mix(deep_col, shallow_col, smoothstep(0.0, 1.0, bank));
+	water.rgb += (rip * 0.04 + flow * 0.03) * (1.0 - bank);
 
-	// Gentle highlight from ripples.
-	water.rgb  += rip * 0.10 * (1.0 - bank);
+	// Foam band just inboard of the edge.
+	float foam = smoothstep(0.58, 0.80, bank) * (1.0 - smoothstep(0.86, 0.97, bank));
+	foam *= 0.6 + 0.4 * sin(UV.y * 24.0 - t * 2.4);
+	vec4 col = mix(water, foam_col, clamp(foam, 0.0, 1.0));
 
-	// Foam band — animated softly along the bank edge.
-	float ft   = smoothstep(foam_w, 0.0, bank - (1.0 - foam_w * 2.0));
-	ft        *= 0.6 + 0.4 * sin(uv.y * 6.0 * scale + t * 1.5);
-	vec4  col  = mix(water, foam_col, clamp(ft, 0.0, 1.0));
+	// Fade the outer edge (banks) and the two ends (source + mouth) so the
+	// river dissolves into the terrain and the sea instead of ending on hard cuts.
+	float edge_fade = 1.0 - smoothstep(0.86, 1.0, bank);
+	float end_fade  = smoothstep(0.0, 0.05, UV.y) * (1.0 - smoothstep(0.88, 1.0, UV.y));
 
 	ALBEDO    = col.rgb;
-	ALPHA     = col.a;
-	ROUGHNESS = 0.10;
+	ALPHA     = col.a * edge_fade * end_fade;
+	ROUGHNESS = 0.08;
 	METALLIC  = 0.0;
-	SPECULAR  = 0.65;
+	SPECULAR  = 0.70;
 }
 """
 	var sh     := Shader.new()
@@ -388,7 +752,7 @@ void fragment() {
 
 
 # ---------------------------------------------------------------------------
-# Mountains
+# Mountains — gated by mountain region, scaled much taller
 # ---------------------------------------------------------------------------
 func _generate_mountain_ranges() -> void:
 	var resources   := _get_or_create("Resources")
@@ -400,7 +764,14 @@ func _generate_mountain_ranges() -> void:
 	var ranges   : int = max(int(round(area_mpx * MOUNTAIN_RANGES_PER_MPX)), 1)
 
 	for _r in ranges:
-		var centre := _random_map_point(0.0)
+		var centre_v = _random_land_point(SEA_LEVEL + 0.05)
+		if centre_v == null:
+			continue
+		var centre: Vector2 = centre_v
+
+		if _mountain_region(centre) < MOUNTAIN_REGION_THRESHOLD:
+			continue
+
 		var dir    := Vector2.RIGHT.rotated(_rng.randf() * TAU)
 		var perp   := dir.orthogonal()
 		var count  := _rng.randi_range(MOUNTAINS_PER_RANGE_MIN, MOUNTAINS_PER_RANGE_MAX)
@@ -410,11 +781,15 @@ func _generate_mountain_ranges() -> void:
 				+ dir  * _rng.randf_range(-1.0, 1.0) * MOUNTAIN_SPREAD * 2.4 \
 				+ perp * _rng.randf_range(-0.45, 0.45) * MOUNTAIN_SPREAD
 			if not _map_rect.has_point(pos): continue
+			if not _is_land(pos):                        continue
 			if _overlaps_river(pos, MOUNTAIN_RADIUS):    continue
 			if _overlaps_mountain(pos, MOUNTAIN_RADIUS): continue
 
 			var m: Node3D = scene_pack.instantiate()
 			resources.add_child(m)
+			var sxz := _rng.randf_range(MOUNTAIN_SCALE_XZ_MIN, MOUNTAIN_SCALE_XZ_MAX)
+			var sy  := _rng.randf_range(MOUNTAIN_SCALE_Y_MIN, MOUNTAIN_SCALE_Y_MAX)
+			m.scale = Vector3(sxz, sy, sxz)
 			m.global_position = _to3(pos)
 			m.stone_amount = _rng.randi_range(MOUNTAIN_STONE_MIN, MOUNTAIN_STONE_MAX)
 			m.iron_amount  = _rng.randi_range(MOUNTAIN_IRON_MIN, MOUNTAIN_IRON_MAX) \
@@ -435,7 +810,10 @@ func _generate_forests() -> void:
 	var clusters : int = max(int(round(area_mpx * FOREST_CLUSTERS_PER_MPX)), 2)
 
 	for _c in clusters:
-		var centre := _random_map_point(0.0)
+		var centre_v = _random_land_point(SEA_LEVEL + 0.02)
+		if centre_v == null:
+			continue
+		var centre: Vector2 = centre_v
 		var count  := _rng.randi_range(TREES_PER_CLUSTER_MIN, TREES_PER_CLUSTER_MAX)
 		for _n in count:
 			var pos := centre + Vector2(
@@ -443,6 +821,7 @@ func _generate_forests() -> void:
 				_rng.randf_range(-FOREST_SPREAD, FOREST_SPREAD)
 			)
 			if not _map_rect.has_point(pos): continue
+			if not _is_land(pos):                    continue
 			if _overlaps_river(pos, TREE_RADIUS):    continue
 			if _overlaps_mountain(pos, TREE_RADIUS): continue
 			if _overlaps_tree(pos, TREE_RADIUS):     continue
@@ -456,8 +835,6 @@ func _generate_forests() -> void:
 # ---------------------------------------------------------------------------
 # Overlap helpers
 # ---------------------------------------------------------------------------
-
-## Raw check against all dense river samples (used for river-vs-river separation).
 func _overlaps_river_raw(pos: Vector2, threshold: float) -> bool:
 	for p in _river_samples_all:
 		if pos.distance_to(p) < threshold:
@@ -465,7 +842,6 @@ func _overlaps_river_raw(pos: Vector2, threshold: float) -> bool:
 	return false
 
 
-## Check used by mountains and trees — against the subsampled rejection grid.
 func _overlaps_river(pos: Vector2, clearance: float) -> bool:
 	var threshold := RIVER_CLEAR_RADIUS + clearance
 	for p in _river_points:
@@ -490,8 +866,9 @@ func _overlaps_tree(pos: Vector2, clearance: float) -> bool:
 	return false
 
 
-## Used by placement validation — checks rivers, mountains, and trees.
 func _placement_blocked(pos: Vector2) -> bool:
+	if not _is_land(pos):
+		return true
 	return (
 		_overlaps_river(pos, SPAWN_SAFE_RADIUS) or
 		_overlaps_mountain(pos, SPAWN_SAFE_RADIUS) or
@@ -503,20 +880,17 @@ func _placement_blocked(pos: Vector2) -> bool:
 # Town center placement
 # ---------------------------------------------------------------------------
 func _begin_placement() -> void:
-	# Reuse the PlacementGhost MeshInstance3D already in main.tscn.
 	var scene := get_tree().current_scene
 	_ghost = scene.get_node_or_null("PlacementGhost") as MeshInstance3D
 	if _ghost == null:
 		push_warning("MapGenerator: PlacementGhost node not found in scene.")
 		return
 
-	# Resize ghost to match VillageCenter footprint (84x55x84).
 	var box      := BoxMesh.new()
 	box.size      = Vector3(84, 55, 84)
 	_ghost.mesh   = box
 	_ghost.visible = true
 
-	# Make a fresh valid/invalid material pair.
 	var mat             := StandardMaterial3D.new()
 	mat.albedo_color     = Color(0.2, 0.9, 0.2, 0.45)
 	mat.transparency     = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -530,16 +904,12 @@ func _begin_placement() -> void:
 func _process(_delta: float) -> void:
 	if _ghost == null or not _ghost.visible:
 		return
-
 	var wp := _mouse_to_ground()
 	if wp == null:
 		return
-
 	var pos2 := Vector2(wp.x, wp.z)
 	_placement_valid = not _placement_blocked(pos2)
-
-	_ghost.position = Vector3(wp.x, 27.5, wp.z)  # 27.5 = half of VillageCenter height
-
+	_ghost.position = Vector3(wp.x, 27.5, wp.z)
 	var mat := _ghost.material_override as StandardMaterial3D
 	mat.albedo_color = Color(0.2, 0.9, 0.2, 0.45) if _placement_valid \
 					 else Color(0.9, 0.15, 0.15, 0.45)
@@ -559,14 +929,12 @@ func _confirm_placement() -> void:
 	var wp := _mouse_to_ground()
 	if wp == null:
 		return
-
 	_ghost.visible = false
 	set_process(false)
 	set_process_input(false)
 
 	var place_pos := Vector3(wp.x, 0.0, wp.z)
 
-	# Spawn VillageCenter.
 	var vc_pack := load(VILLAGE_CENTER_SCENE) as PackedScene
 	if vc_pack:
 		var vc : Node3D = vc_pack.instantiate()
@@ -575,7 +943,6 @@ func _confirm_placement() -> void:
 	else:
 		push_warning("MapGenerator: could not load " + VILLAGE_CENTER_SCENE)
 
-	# Spawn 5 citizens in a ring around it.
 	var cit_pack := load(CITIZEN_SCENE) as PackedScene
 	if cit_pack:
 		var units := _get_or_create("Units")
@@ -591,16 +958,13 @@ func _confirm_placement() -> void:
 	rebake_navigation()
 
 
-## Casts a ray from the mouse through Camera3D onto the Y=0 plane.
 func _mouse_to_ground() -> Vector3:
 	var scene  := get_tree().current_scene
-	# Camera is a Node3D wrapper; the actual Camera3D is its child.
 	var cam    := scene.get_node_or_null("Camera/Camera3D") as Camera3D
 	if cam == null:
 		cam = get_viewport().get_camera_3d()
 	if cam == null:
 		return Vector3.ZERO
-
 	var mpos       := get_viewport().get_mouse_position()
 	var ray_origin := cam.project_ray_origin(mpos)
 	var ray_dir    := cam.project_ray_normal(mpos)
@@ -678,16 +1042,6 @@ func _bake_navigation() -> void:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-func _random_map_point(min_dist_from_center: float = 0.0) -> Vector2:
-	for _attempt in 30:
-		var p := Vector2(
-			_rng.randf_range(_map_rect.position.x, _map_rect.end.x),
-			_rng.randf_range(_map_rect.position.y, _map_rect.end.y)
-		)
-		if p.distance_to(_center) >= min_dist_from_center:
-			return p
-	return _center + Vector2(min_dist_from_center, min_dist_from_center)
-
 func _to3(v: Vector2, y: float = 0.0) -> Vector3:
 	return Vector3(v.x, y, v.y)
 
