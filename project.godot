@@ -11,13 +11,13 @@ config_version=5
 [application]
 
 config/name="Empire: Settlers at War"
-run/main_scene="res://scenes/main_menu.tscn"
+run/main_scene="res://scenes/core/main_menu.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://icon.svg"
 
 [autoload]
 
-GameManager="*res://scripts/game_manager.gd"
+GameManager="*res://scripts/core/game_manager.gd"
 MapSettings="*uid://f5osw15nbhyj"
 
 [display]

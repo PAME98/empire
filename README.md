@@ -78,22 +78,31 @@ together.
 
 ## Controls
 
-| Action                         | Input              |
-|---------------------------------|--------------------|
-| Select unit/building/resource    | Left click         |
-| Box select (multiple units)     | Left click + drag  |
-| Move / gather / attack / build  | Right click        |
-| Pan camera                      | WASD / Arrow keys  |
-| Zoom                            | Mouse wheel        |
-| Cancel building placement       | Right click / Esc  |
-| Deselect                        | Esc                |
+The game is **3D** (an angled, Empire-Earth-style top-down camera over a flat
+ground plane; units and buildings are primitive meshes for now).
+
+| Action                          | Input                       |
+|---------------------------------|-----------------------------|
+| Select unit/building/resource   | Left click                  |
+| Box select (multiple units)     | Left click + drag           |
+| Move / gather / attack / build  | Right click                 |
+| Pan camera                      | WASD / Arrows / screen edge |
+| Rotate camera                   | Q / E                       |
+| Zoom                            | Mouse wheel                 |
+| Artillery area strike           | T, then left-click ground   |
+| Cancel placement / targeting    | Right click / Esc           |
+| Deselect                        | Esc                         |
+
+Panning is **screen-relative** — it follows whichever way the camera is
+rotated. Selection and orders use a ray from the cursor into the world (objects
+are picked by their colliders; empty ground is the ray's hit on the y=0 plane).
 
 Box-select grabs **any mix of citizens and soldiers** at once — right-click
 afterward and every selected unit gets a context-appropriate order:
 
 - right-click empty ground → everyone moves there
 - right-click a tree → selected citizens go chop it; soldiers ignore it
-- right-click a farm/lumber camp/quarry → citizens join it as a worker
+- right-click a farm/lumber camp/quarry/mine → citizens join it as a worker
 - right-click a construction site → citizens help build it
 - right-click an enemy → soldiers attack it; citizens ignore it
 
@@ -104,12 +113,18 @@ afterward and every selected unit gets a context-appropriate order:
   Elder**, and can die of **starvation** (not enough food at year-end) or
   **old age**.
 - Adult citizens auto-assign themselves to open jobs at **Farms**, **Lumber
-  Camps**, and **Quarries** if you haven't given them a direct order. Each
-  building has a small number of worker slots and a stockpile that workers
-  draw from and carry back to the **Village Center**.
-- **Trees** are a separate, depletable world resource — citizens chop them
-  directly (no building required) and the tree shrinks and disappears as
-  it's harvested.
+  Camps**, **Quarries**, and **Mines** if you haven't given them a direct
+  order. Each building has a small number of worker slots and a stockpile that
+  workers draw from and carry back to the **Village Center**.
+- **Mountains** are solid terrain holding two independent mineral pools: every
+  mountain has **stone**, and some also have **iron** (shown by a darker vein).
+  You don't mine a mountain by hand — you build a **Quarry** on it for stone
+  and/or a **Mine** on it for iron. Because the pools are separate, one mountain
+  can host both at once, each building draining only its own pool.
+- **Trees** and **water** are depletable resources citizens gather directly
+  (no building): trees give **wood**, river tiles give **water**. Water is
+  spent recruiting citizens; iron is spent training **artillery**.
+- The six tracked resources are **food, wood, stone, iron, water, gold**.
 - A direct player order (right-click) always overrides the autonomous job
   AI. Selecting a citizen and giving it an order is exactly as direct as
   commanding a soldier — that uniformity is the core fix from the old
@@ -132,28 +147,63 @@ afterward and every selected unit gets a context-appropriate order:
 
 ## Project structure
 
+Scripts and scenes are grouped by **domain**, and `scenes/` mirrors
+`scripts/`. The folders also read as the game's layering, roughly in the order
+a frame flows through them:
+
 ```
-scripts/
-  game_manager.gd     Autoload: resources, population, time/seasons, selection state
-  unit.gd              Base class: movement, selection, health, combat
-  citizen.gd           extends Unit — the economy unit (aging, jobs, gather/build/move orders)
-  soldier.gd           extends Unit — the military unit (attack/move orders, auto-aggro)
-  building.gd          Base class: construction progress, health, selection
-  resource_building.gd extends Building — shared worker-slot + stockpile logic
-  farm.gd / lumber_camp.gd / quarry.gd   extend ResourceBuilding (one-liners now — see below)
-  resource_node.gd     Depletable world resource (trees)
-  house.gd             extends Building — adds housing capacity
-  village_center.gd    extends Building — recruits citizens, resource drop-off
-  barracks.gd          extends Building — trains soldiers
-  camera_controller.gd RTS input layer: pan/zoom/box-select/right-click commands/placement
-  ui_controller.gd     Wires GameManager signals to the HUD
-  main.gd              Registers hand-placed starting citizens on boot
+core/       Boot + shared state
+  game_manager.gd   Autoload — the single source of truth: resources,
+                    population, time/seasons, selection, placement. Everything
+                    else talks to the game THROUGH this.
+  map_settings.gd   Autoload — carries the chosen map size from menu to game.
+  main.gd           Registers the hand-placed starting citizens on boot.
+  main_menu.gd      Map-size picker (the project's main scene).
+
+world/      The map and its raw resources
+  map_generator.gd  Builds ground, rivers, mountain ranges and forests on load.
+  mountain.gd       Solid terrain holding separate stone + iron pools; a
+                    quarry and/or mine is built on it to extract them.
+  resource_node.gd  Depletable, hand-gathered world resource (trees, water).
+
+units/      Everything that moves
+  unit.gd           Base class: movement, selection, health, combat.
+  citizen.gd        Economy unit — aging, jobs, gather/build/move orders.
+  soldier.gd        Melee RTS unit (auto-defends when idle).
+  artillery.gd      Siege RTS unit (area strikes; fires only on command).
+
+buildings/  Everything you construct
+  building.gd            Base class: construction progress, health, selection.
+  resource_building.gd   Worker slots + stockpile + mountain-deposit binding.
+  farm/lumber_camp/quarry/mine.gd   Thin subclasses — just tuning numbers.
+  house.gd               Adds housing capacity.
+  village_center.gd      Recruits citizens; resource drop-off point.
+  barracks.gd            Trains soldiers and artillery.
+
+input/      Turning mouse/keys into orders
+  camera_controller.gd   RTS input: pan/zoom/edge-pan, box-select, right-click
+                         commands, building placement.
+
+ui/         Reflecting state back to the player
+  ui_controller.gd       Binds GameManager signals to the HUD.
+
+effects/    Throwaway visuals
+  explosion_effect.gd / attack_area_indicator.gd
 ```
 
-`Farm`, `LumberCamp`, and `Quarry` are now thin subclasses of
-`ResourceBuilding` that just set tuning numbers (worker cap, production
-rate, group name) — the worker-slot/stockpile logic that used to be copied
-three times with slightly different bugs now lives in one place.
+`scenes/` uses the same folders (e.g. `scenes/units/citizen.tscn` pairs with
+`scripts/units/citizen.gd`).
+
+**To understand any feature, start at `GameManager` and follow the signal.**
+Units and buildings never mutate each other's resources or population
+directly — they call `GameManager`, which emits `resources_changed` /
+`selection_changed` / `notification` / etc., and `ui_controller` turns those
+into what you see on screen.
+
+`Farm`, `LumberCamp`, `Quarry`, and `Mine` are thin subclasses of
+`ResourceBuilding` that only set tuning numbers (worker cap, production rate,
+group name, yielded resource) — the shared worker-slot/stockpile/deposit logic
+lives in one place instead of being copied per building.
 
 ## Extending it
 
