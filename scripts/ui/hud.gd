@@ -60,16 +60,34 @@ var _backdrop: ColorRect = null
 var _launcher: Button = null
 var _cards := {}
 var _demolish_btn: Button = null
+var _gm_connected := false
 
 
 func _ready() -> void:
+	# NOTE: deliberately does NOT touch GameManager here. Autoloads run _ready in
+	# list order, so if Hud is above GameManager, accessing it now would crash
+	# and the whole HUD would silently never run. We wait until a scene UI shows
+	# up (by then every autoload exists).
+	print("[Hud] ready — waiting for UI CanvasLayer")
 	_theme = _make_theme()
 	get_tree().node_added.connect(_on_node_added)
-	if GameManager.has_signal("resources_changed"):
-		GameManager.resources_changed.connect(_on_resources_changed)
-	if GameManager.has_signal("placement_mode_changed"):
-		GameManager.placement_mode_changed.connect(func(_a,_b): _refresh_cards())
 	call_deferred("_try_existing")
+
+
+func _connect_game_manager() -> void:
+	if _gm_connected:
+		return
+	if typeof(GameManager) == TYPE_NIL:
+		return
+	if GameManager.has_signal("resources_changed") and not GameManager.resources_changed.is_connected(_on_resources_changed):
+		GameManager.resources_changed.connect(_on_resources_changed)
+	if GameManager.has_signal("placement_mode_changed") and not GameManager.placement_mode_changed.is_connected(_on_placement_changed):
+		GameManager.placement_mode_changed.connect(_on_placement_changed)
+	_gm_connected = true
+
+
+func _on_placement_changed(_a, _b) -> void:
+	_refresh_cards()
 
 
 func _try_existing() -> void:
@@ -91,6 +109,7 @@ func _on_node_added(n: Node) -> void:
 func _install(ui: CanvasLayer) -> void:
 	if ui == _ui and is_instance_valid(_menu):
 		return
+	print("[Hud] installing on UI: ", ui.get_path())
 	_ui = ui
 	# theme existing panels
 	for c in ui.get_children():
@@ -108,6 +127,7 @@ func _install(ui: CanvasLayer) -> void:
 func _build_all() -> void:
 	if not is_instance_valid(_ui):
 		return
+	_connect_game_manager()
 	# clear anything we (or an old build_menu) made, so re-installs don't stack
 	for nm in ["ResourceBar", "HudMenu", "HudBackdrop", "HudBuildToggle", "BuildToggle", "BuildBackdrop"]:
 		var old = _ui.get_node_or_null(nm)
@@ -117,6 +137,7 @@ func _build_all() -> void:
 	_build_menu()
 	_refresh_resources()
 	_refresh_cards()
+	print("[Hud] installed — resource bar + build menu added")
 
 
 # ===========================================================================

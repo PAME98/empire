@@ -1,37 +1,74 @@
 extends Control
-## Main menu — lets the player pick a map size then launches the game.
-## Attach this to a Control node that is your main_menu.tscn root.
+## Main menu — now includes Host and Join buttons for multiplayer.
 ##
-## Expected scene tree:
-##   Control  (this script)
-##   └── VBoxContainer
-##       ├── Label              "title_label"   — game title
-##       ├── Label              "subtitle"      — "Select Map Size"
-##       ├── Button             "small_btn"     — Small  (2560 × 1440)
-##       ├── Button             "medium_btn"    — Medium (5120 × 2880)
-##       ├── Button             "large_btn"     — Large  (8192 × 4608)
-##       └── Button             "huge_btn"      — Huge   (12288 × 6912)
-##
-## NOTE: with the continent/ocean generator, roughly half of each map is open
-## water, so the effective LAND area is about half these figures. Sizes were
-## bumped accordingly so the playable landmass is still "vastly bigger" than
-## the old solid-rectangle maps.
+## Expected scene tree additions:
+##   VBoxContainer
+##   ├── ... (existing size buttons)
+##   ├── HSeparator
+##   ├── Label          "MultiplayerLabel"   "— Multiplayer —"
+##   ├── Button         "HostButton"
+##   ├── HBoxContainer  "JoinRow"
+##   │   ├── LineEdit   "AddressEdit"        placeholder "Server IP"
+##   │   └── Button     "JoinButton"
+##   └── Label          "ErrorLabel"
 
-const GAME_SCENE := "res://scenes/core/main.tscn"
+const GAME_SCENE  := "res://scenes/core/main.tscn"
+const LOBBY_SCENE := "res://scenes/ui/lobby.tscn"
 
-@onready var small_btn:  Button = $VBoxContainer/SmallButton
-@onready var medium_btn: Button = $VBoxContainer/MediumButton
-@onready var large_btn:  Button = $VBoxContainer/LargeButton
-@onready var huge_btn:   Button = $VBoxContainer/HugeButton
+@onready var small_btn:   Button   = $VBoxContainer/SmallButton
+@onready var medium_btn:  Button   = $VBoxContainer/MediumButton
+@onready var large_btn:   Button   = $VBoxContainer/LargeButton
+@onready var huge_btn:    Button   = $VBoxContainer/HugeButton
+@onready var host_btn:    Button   = $VBoxContainer/HostButton
+@onready var join_btn:    Button   = $VBoxContainer/JoinRow/JoinButton
+@onready var address_edit: LineEdit = $VBoxContainer/JoinRow/AddressEdit
+@onready var error_label: Label    = $VBoxContainer/ErrorLabel
+
+@onready var name_edit: LineEdit   = $VBoxContainer/NameEdit
 
 
 func _ready() -> void:
-	small_btn.pressed.connect(func():  _start(Vector2( 2560,  1440)))
-	medium_btn.pressed.connect(func(): _start(Vector2( 5120,  2880)))
-	large_btn.pressed.connect(func():  _start(Vector2( 8192,  4608)))
-	huge_btn.pressed.connect(func():   _start(Vector2(12288,  6912)))
+	# Single-player (direct launch)
+	small_btn.pressed.connect(func():  _start_solo(Vector2( 1280,  720)))
+	medium_btn.pressed.connect(func(): _start_solo(Vector2( 2560, 1440)))
+	large_btn.pressed.connect(func():  _start_solo(Vector2( 4096, 2304)))
+	huge_btn.pressed.connect(func():   _start_solo(Vector2( 6144, 3456)))
+
+	host_btn.pressed.connect(_on_host_pressed)
+	join_btn.pressed.connect(_on_join_pressed)
+	error_label.visible = false
 
 
-func _start(size: Vector2) -> void:
+func _start_solo(size: Vector2) -> void:
 	MapSettings.map_size = size
+	MapSettings.rng_seed = randi()
 	get_tree().change_scene_to_file(GAME_SCENE)
+
+
+func _on_host_pressed() -> void:
+	NetworkManager.my_name = name_edit.text.strip_edges()
+	if NetworkManager.my_name.is_empty():
+		NetworkManager.my_name = "Host"
+	var err := NetworkManager.host_game()
+	if err != OK:
+		_show_error("Failed to host: %s" % error_string(err))
+		return
+	get_tree().change_scene_to_file(LOBBY_SCENE)
+
+
+func _on_join_pressed() -> void:
+	var address := address_edit.text.strip_edges()
+	if address.is_empty(): address = "127.0.0.1"
+	NetworkManager.my_name = name_edit.text.strip_edges()
+	if NetworkManager.my_name.is_empty():
+		NetworkManager.my_name = "Player"
+	var err := NetworkManager.join_game(address)
+	if err != OK:
+		_show_error("Failed to connect: %s" % error_string(err))
+		return
+	get_tree().change_scene_to_file(LOBBY_SCENE)
+
+
+func _show_error(msg: String) -> void:
+	error_label.text    = msg
+	error_label.visible = true
