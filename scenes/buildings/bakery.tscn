@@ -1,0 +1,44 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/buildings/bakery.gd" id="1_s"]
+
+[sub_resource type="StandardMaterial3D" id="FinMat"]
+albedo_color = Color(0.78, 0.45, 0.28, 1)
+
+[sub_resource type="BoxMesh" id="FinMesh"]
+material = SubResource("FinMat")
+size = Vector3(64, 18, 64)
+
+[sub_resource type="BoxShape3D" id="Shape"]
+size = Vector3(64, 18, 64)
+
+[sub_resource type="StandardMaterial3D" id="SelectionRing_mat"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(0, 1, 0, 0.5)
+
+[sub_resource type="CylinderMesh" id="SelectionRing_mesh"]
+material = SubResource("SelectionRing_mat")
+top_radius = 40.0
+bottom_radius = 40.0
+height = 0.5
+
+[node name="Bakery" type="StaticBody3D" groups=["buildings"]]
+script = ExtResource("1_s")
+
+[node name="FinishedMesh" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 9, 0)
+mesh = SubResource("FinMesh")
+
+[node name="ConstructionMesh" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 9, 0)
+visible = false
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 9, 0)
+shape = SubResource("Shape")
+
+[node name="SelectionRing" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0)
+visible = false
+mesh = SubResource("SelectionRing_mesh")

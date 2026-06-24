@@ -47,6 +47,11 @@ const SEA_LEVEL              := 0.46
 ## borders under water. Keeps a clean coast ring around the playable area.
 const EDGE_FALLOFF_START     := 0.55
 const EDGE_FALLOFF_STRENGTH  := 1.15
+## Ground fragments below SEA_LEVEL - COAST_FEATHER are discarded (ocean shows);
+## the sand beach band spans SEA_LEVEL .. SEA_LEVEL + BEACH_BAND. River mouths
+## use these so they reach past the sand and actually touch the water.
+const COAST_FEATHER := 0.010
+const BEACH_BAND    := 0.030
 
 ## Heights. Ground plane sits at GROUND_Y; ocean surface a touch below so it
 ## shows through the discarded coast and never floods flat land.
@@ -121,11 +126,11 @@ const RIVER_SAMPLES      := 120
 const RIVER_REJECT_STEP  := 2
 const RIVER_CLEAR_RADIUS := RIVER_WIDTH_MAX * 0.5 + MIN_OBSTACLE_GAP
 const RIVER_MIN_SEPARATION := RIVER_WIDTH_MAX + 80.0
-const RIVER_Y := 0.10
-## Mouth handling: extra downhill steps past the coast so the mouth sits in the
-## sea, and the land_value span over which the river surface drops to sea level.
-const RIVER_MOUTH_STEPS := 5
-const RIVER_MOUTH_DROP  := 0.22
+const RIVER_Y := 0.05
+## River mouths end here — just seaward of the ground discard edge so they
+## overlap the ocean instead of stopping in the beach sand.
+const RIVER_MOUTH_OVERSHOOT := 0.03
+const RIVER_MOUTH_LEVEL     := SEA_LEVEL - COAST_FEATHER - RIVER_MOUTH_OVERSHOOT
 ## Steps used to confirm a river's mouth reaches open ocean (not an inland lake).
 const OCEAN_CHECK_STEPS := 90
 
@@ -358,6 +363,8 @@ void fragment() {
 	mat.set_shader_parameter("land_mask", _land_mask_tex)
 	mat.set_shader_parameter("world_size", _map_rect.size)
 	mat.set_shader_parameter("sea_level", SEA_LEVEL)
+	mat.set_shader_parameter("coast_feather", COAST_FEATHER)
+	mat.set_shader_parameter("beach_band", BEACH_BAND)
 	return mat
 
 
@@ -495,9 +502,6 @@ func _make_river_to_sea() -> Array[Vector2]:
 			continue
 		if _polyline_self_intersects(ctrl):
 			continue
-		# All rivers must reach open ocean — reject ones that dead-end in a lake.
-		if not _is_open_ocean(ctrl[ctrl.size() - 1]):
-			continue
 		_river_sources.append(src)
 		return ctrl
 	return []
@@ -520,11 +524,22 @@ func _is_open_ocean(pos: Vector2) -> bool:
 	return false
 
 
+## Point on segment a->b where land_value crosses `level`. Used to end the
+## river just past the shore (at RIVER_MOUTH_LEVEL) so it touches the water.
+func _crossing_at(a: Vector2, b: Vector2, level: float) -> Vector2:
+	var va := _land_value(a)
+	var vb := _land_value(b)
+	var denom := va - vb
+	if absf(denom) < 0.000001:
+		return b
+	var f := clampf((va - level) / denom, 0.0, 1.0)
+	return a.lerp(b, f)
+
+
 func _march_to_sea(start: Vector2) -> Array[Vector2]:
 	var pts: Array[Vector2] = [start]
 	var pos := start
 	var prev_dir := Vector2.ZERO
-	var sea_steps := 0
 
 	for _step in RIVER_MARCH_MAX_STEPS:
 		var down := -_land_gradient(pos)
@@ -538,22 +553,26 @@ func _march_to_sea(start: Vector2) -> Array[Vector2]:
 		down = down.rotated(_rng.randf_range(-0.14, 0.14))
 		prev_dir = down
 
-		pos += down * RIVER_MARCH_STEP
-		var on_border := pos.x <= _map_rect.position.x or pos.x >= _map_rect.end.x \
-				or pos.y <= _map_rect.position.y or pos.y >= _map_rect.end.y
-		pos.x = clampf(pos.x, _map_rect.position.x, _map_rect.end.x)
-		pos.y = clampf(pos.y, _map_rect.position.y, _map_rect.end.y)
-		pts.append(pos)
+		var next := pos + down * RIVER_MARCH_STEP
+		var on_border := next.x <= _map_rect.position.x or next.x >= _map_rect.end.x \
+				or next.y <= _map_rect.position.y or next.y >= _map_rect.end.y
+		next.x = clampf(next.x, _map_rect.position.x, _map_rect.end.x)
+		next.y = clampf(next.y, _map_rect.position.y, _map_rect.end.y)
 
-		# Once in water keep going a few steps so the mouth sits in the sea.
-		if _land_value(pos) <= SEA_LEVEL:
-			sea_steps += 1
-			if sea_steps >= RIVER_MOUTH_STEPS:
-				return pts
-
-		# Running off the border means we've reached open ocean.
-		if on_border:
+		# Reached water past the beach: confirm open ocean, then end the river
+		# right at the mouth level (just into the water, overlapping the ocean).
+		if _land_value(next) <= RIVER_MOUTH_LEVEL:
+			if not _is_open_ocean(next):
+				return []   # leads to an inland lake — reject
+			pts.append(_crossing_at(pos, next, RIVER_MOUTH_LEVEL))
 			return pts
+
+		pts.append(next)
+		pos = next
+
+		# Ran to the border while still on land — no clean ocean mouth.
+		if on_border:
+			return []
 
 	return []
 
@@ -700,48 +719,53 @@ func _river_surface_y(pos: Vector2) -> float:
 	var lv := _land_value(pos)
 	if lv >= SEA_LEVEL:
 		return RIVER_Y
-	var k := clampf((SEA_LEVEL - lv) / RIVER_MOUTH_DROP, 0.0, 1.0)
-	return lerpf(RIVER_Y, OCEAN_Y + 0.02, k)
+	# Ease from land height at the shore down to the ocean surface at the mouth.
+	var span := maxf(SEA_LEVEL - RIVER_MOUTH_LEVEL, 0.0001)
+	var k := clampf((SEA_LEVEL - lv) / span, 0.0, 1.0)
+	return lerpf(RIVER_Y, OCEAN_Y, k)
 
 
 func _make_water_material() -> ShaderMaterial:
-	# Soft-edged flowing river: deep centre, shallow toward the banks, a foam
-	# band just inboard of the edge, and the very edge faded to zero alpha so the
-	# river dissolves into the terrain instead of ending on a hard rim.
+	# Flat, matte, stylised river — low specular and low cross-section contrast so
+	# it reads as water lying on the ground, not a glossy 3D tube. Subtle ripples,
+	# a thin foam line at the banks, soft edges and ends that fade into terrain/sea.
 	var code := """
 shader_type spatial;
-render_mode blend_mix, cull_disabled, diffuse_lambert, specular_schlick_ggx;
+render_mode blend_mix, cull_disabled, diffuse_lambert;
 
-uniform vec4  deep_col    : source_color = vec4(0.07, 0.26, 0.48, 0.92);
-uniform vec4  shallow_col : source_color = vec4(0.24, 0.54, 0.74, 0.85);
-uniform vec4  foam_col    : source_color = vec4(0.92, 0.97, 1.00, 0.90);
-uniform float speed       : hint_range(0.1, 2.0) = 0.5;
+uniform vec4  water_col : source_color = vec4(0.16, 0.42, 0.66, 0.86);
+uniform vec4  deep_col  : source_color = vec4(0.11, 0.33, 0.56, 0.88);
+uniform vec4  foam_col  : source_color = vec4(0.88, 0.95, 1.00, 0.90);
+uniform float speed     : hint_range(0.1, 2.0) = 0.45;
 
 void fragment() {
 	float t    = TIME * speed;
 	float bank = abs(UV.x - 0.5) * 2.0;          // 0 centre .. 1 edge
 
-	float rip  = sin(UV.y * 20.0 - t * 2.0) * 0.5 + 0.5;
-	float flow = sin((UV.y * 26.0 - t * 2.2) + UV.x * 4.0) * 0.5 + 0.5;
+	// Gentle, low-contrast ripple so the surface stays flat-looking.
+	float rip  = sin(UV.y * 16.0 - t * 2.0) * 0.5 + 0.5;
+	float rip2 = sin(UV.y * 8.0 + UV.x * 5.0 - t * 1.2) * 0.5 + 0.5;
+	float shade = (rip * 0.5 + rip2 * 0.5) - 0.5;
 
-	vec4 water = mix(deep_col, shallow_col, smoothstep(0.0, 1.0, bank));
-	water.rgb += (rip * 0.04 + flow * 0.03) * (1.0 - bank);
+	// Very mild centre->bank shift (no strong gradient => no cylindrical look).
+	vec3 col = mix(deep_col.rgb, water_col.rgb, bank * 0.35);
+	col += shade * 0.04;
 
-	// Foam band just inboard of the edge.
-	float foam = smoothstep(0.58, 0.80, bank) * (1.0 - smoothstep(0.86, 0.97, bank));
-	foam *= 0.6 + 0.4 * sin(UV.y * 24.0 - t * 2.4);
-	vec4 col = mix(water, foam_col, clamp(foam, 0.0, 1.0));
+	// Thin foam line hugging the banks.
+	float foam = smoothstep(0.74, 0.90, bank) * (1.0 - smoothstep(0.93, 1.0, bank));
+	foam *= 0.6 + 0.4 * sin(UV.y * 20.0 - t * 2.2);
+	col = mix(col, foam_col.rgb, clamp(foam, 0.0, 1.0) * 0.8);
 
-	// Fade the outer edge (banks) and the two ends (source + mouth) so the
-	// river dissolves into the terrain and the sea instead of ending on hard cuts.
-	float edge_fade = 1.0 - smoothstep(0.86, 1.0, bank);
-	float end_fade  = smoothstep(0.0, 0.05, UV.y) * (1.0 - smoothstep(0.88, 1.0, UV.y));
+	// Soft banks + faded ends.
+	float edge_fade = 1.0 - smoothstep(0.90, 1.0, bank);
+	float end_fade  = smoothstep(0.0, 0.05, UV.y) * (1.0 - smoothstep(0.90, 1.0, UV.y));
+	float a = mix(deep_col.a, water_col.a, bank);
 
-	ALBEDO    = col.rgb;
-	ALPHA     = col.a * edge_fade * end_fade;
-	ROUGHNESS = 0.08;
+	ALBEDO    = col;
+	ALPHA     = a * edge_fade * end_fade;
+	ROUGHNESS = 0.65;
 	METALLIC  = 0.0;
-	SPECULAR  = 0.70;
+	SPECULAR  = 0.12;
 }
 """
 	var sh     := Shader.new()
