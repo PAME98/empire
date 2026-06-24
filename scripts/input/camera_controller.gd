@@ -32,14 +32,54 @@ var selection_box: Control = null            # 2D overlay in the UI layer
 var placement_ghost: Node3D = null           # world-space ghost (MeshInstance3D)
 var attack_area_ghost: AttackAreaIndicator = null
 
+## Every placeable building's scene. MUST cover every id in build_menu.CATALOG
+## and GameManager.COSTS, or _confirm_placement() silently cancels and nothing
+## spawns (which is why most buildings appeared to "do nothing").
 const BUILDING_SCENES := {
-	"house": "res://scenes/buildings/house.tscn",
-	"farm": "res://scenes/buildings/farm.tscn",
-	"lumber_camp": "res://scenes/buildings/lumber_camp.tscn",
-	"quarry": "res://scenes/buildings/quarry.tscn",
-	"mine": "res://scenes/buildings/mine.tscn",
-	"barracks": "res://scenes/buildings/barracks.tscn",
+	"house":         "res://scenes/buildings/house.tscn",
+	"farm":          "res://scenes/buildings/farm.tscn",
+	"grain_farm":    "res://scenes/buildings/grain_farm.tscn",
+	"veg_garden":    "res://scenes/buildings/veg_garden.tscn",
+	"hunter":        "res://scenes/buildings/hunter.tscn",
+	"lumber_camp":   "res://scenes/buildings/lumber_camp.tscn",
+	"quarry":        "res://scenes/buildings/quarry.tscn",
+	"mine":          "res://scenes/buildings/mine.tscn",
+	"herbalist":     "res://scenes/buildings/herbalist.tscn",
+	"well":          "res://scenes/buildings/well.tscn",
+	"charcoal_kiln": "res://scenes/buildings/charcoal_kiln.tscn",
+	"mill":          "res://scenes/buildings/mill.tscn",
+	"bakery":        "res://scenes/buildings/bakery.tscn",
+	"sawmill":       "res://scenes/buildings/sawmill.tscn",
+	"smelter":       "res://scenes/buildings/smelter.tscn",
+	"blacksmith":    "res://scenes/buildings/blacksmith.tscn",
+	"apothecary":    "res://scenes/buildings/apothecary.tscn",
+	"barracks":      "res://scenes/buildings/barracks.tscn",
 }
+
+## Buildings that are meant to sit ON a mountain deposit, so they skip the
+## "blocked by terrain" check (and the ghost stays green over mountains).
+const DEPOSIT_BUILDINGS := ["quarry", "mine"]
+
+const GHOST_VALID_COLOR   := Color(0.2, 0.9, 0.2, 0.45)
+const GHOST_INVALID_COLOR := Color(0.9, 0.15, 0.15, 0.45)
+
+## Build grid. One cell = one kit tile at the global building scale, so building
+## footprints (whole numbers of tiles) line up exactly with cells and tile the
+## raster edge-to-edge. The grid the player sees and snaps to.
+const KIT_UNIT := 14.0
+const GRID_RADIUS_CELLS := 12          # how many cells around the cursor to draw
+const GRID_LINE_COLOR := Color(0.95, 0.95, 1.0, 0.20)
+const GRID_LINE_COLOR_HI := Color(0.3, 0.95, 0.4, 0.6)
+
+## Footprint of the building currently being placed (cached when the ghost is
+## built, so the per-frame snap/overlap test is cheap).
+var _ghost_footprint: float = 36.0
+var _ghost_extents: Vector2 = Vector2(24, 24)
+var placement_grid: MeshInstance3D = null
+
+
+func grid_cell() -> float:
+	return KIT_UNIT * Building.GLOBAL_BUILDING_SCALE
 
 
 func _ready() -> void:
@@ -57,8 +97,27 @@ func _ready() -> void:
 	GameManager.placement_mode_changed.connect(_on_placement_mode_changed)
 	GameManager.attack_targeting_mode_changed.connect(_on_attack_targeting_mode_changed)
 
+	_build_placement_grid()
+
 	_map_size = MapSettings.map_size
 	_apply_zoom()
+
+
+## A flat grid overlay (little squares) shown on the ground while placing.
+func _build_placement_grid() -> void:
+	placement_grid = MeshInstance3D.new()
+	placement_grid.name = "PlacementGrid"
+	placement_grid.mesh = ImmediateMesh.new()
+	placement_grid.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.vertex_color_use_as_albedo = true
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.no_depth_test = false
+	placement_grid.material_override = m
+	placement_grid.visible = false
+	get_tree().current_scene.add_child.call_deferred(placement_grid)
 
 
 # ---------------------------------------------------------------------------
@@ -83,17 +142,15 @@ func _process(delta: float) -> void:
 		rotation.y -= rotate_speed * delta
 
 	if GameManager.is_placing_building and placement_ghost and placement_ghost.visible:
-		var gp := _ground_point(_mouse())
+		var raw := _ground_point(_mouse())
+		var gp := _snap_to_grid(raw, _ghost_extents)
 		placement_ghost.global_position = gp
-		var ok := GameManager.placement_building_id in ["quarry", "mine"] \
-		or GameManager.can_place_building_at(gp)
-		var gmat := placement_ghost.material_override as StandardMaterial3D
-		if gmat == null:
-			gmat = StandardMaterial3D.new()
-			gmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			gmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-			placement_ghost.material_override = gmat
-			gmat.albedo_color = Color(0.2, 0.9, 0.2, 0.45) if ok else Color(0.9, 0.15, 0.15, 0.45)
+		var terrain_ok := GameManager.placement_building_id in DEPOSIT_BUILDINGS \
+			or GameManager.can_place_building_at(gp, _ghost_footprint)
+		# Footprints may touch (sit in adjacent cells) but not overlap.
+		var ok := terrain_ok and not _overlaps_existing_building(gp, _ghost_extents)
+		_tint_ghost(placement_ghost, ok)
+		_draw_grid(gp, ok)
 
 	if GameManager.is_targeting_attack_position and attack_area_ghost and attack_area_ghost.visible:
 		attack_area_ghost.global_position = _ground_point(_mouse())
@@ -315,22 +372,40 @@ func _confirm_placement() -> void:
 		GameManager.cancel_building_placement()
 		return
 
-	var placement_pos := _ground_point(_mouse())
+	# Instantiate first so we can measure the real footprint (its _ready applies
+	# the size scale and registers it in the "buildings" group).
+	var building = load(scene_path).instantiate()
+	get_tree().current_scene.get_node("Buildings").add_child(building)
 
-	# Quarry/mine are deliberately exempt — they're SUPPOSED to sit on a
-	# mountain deposit (checked below via bind_to_deposit). Every other
-	# building must not overlap a river, mountain, or tree; previously
-	# nothing checked this at all, so buildings could be dropped on rivers.
-	var exempt_from_terrain_check :Variant = building_id in ["quarry", "mine"]
-	if not exempt_from_terrain_check and not GameManager.can_place_building_at(placement_pos):
+	var my_ext := Vector2(24, 24) * Building.GLOBAL_BUILDING_SCALE
+	if building.has_method("footprint_extents"):
+		my_ext = building.footprint_extents()
+	# Snap to the same grid the ghost previews on.
+	var placement_pos := _snap_to_grid(_ground_point(_mouse()), my_ext)
+	building.global_position = placement_pos
+
+	var my_r := 36.0 * Building.GLOBAL_BUILDING_SCALE
+	if building.has_method("footprint_radius"):
+		my_r = building.footprint_radius()
+
+	# Quarry/mine are deliberately exempt from the TERRAIN check — they're
+	# SUPPOSED to sit on a mountain deposit (bound below). They are NOT exempt
+	# from the building-overlap check.
+	var exempt_from_terrain_check :Variant = building_id in DEPOSIT_BUILDINGS
+	if not exempt_from_terrain_check and not GameManager.can_place_building_at(placement_pos, my_r):
 		GameManager.notify("Can't build there — blocked by terrain (river, mountain, or tree).")
+		building.queue_free()
 		GameManager.cancel_building_placement()
 		return
 
-	var building = load(scene_path).instantiate()
-	get_tree().current_scene.get_node("Buildings").add_child(building)
-	building.global_position = placement_pos
-	GameManager.clear_trees_at(placement_pos, 44.0)
+	# Footprints may touch but not overlap.
+	if _overlaps_existing_building(placement_pos, my_ext, building):
+		GameManager.notify("Can't build there — another building is in the way.")
+		building.queue_free()
+		GameManager.cancel_building_placement()
+		return
+
+	GameManager.clear_trees_at(placement_pos, my_r)
 
 	if building is ResourceBuilding and building.deposit_group != "":
 		if not building.bind_to_deposit(64.0):
@@ -360,13 +435,204 @@ func _confirm_placement() -> void:
 	GameManager.cancel_building_placement()
 
 
-func _on_placement_mode_changed(active: bool, _building_id: String) -> void:
-	if placement_ghost:
-		placement_ghost.visible = active
+# ---------------------------------------------------------------------------
+# Placement ghost — now shows the actual building model at its real size
+# ---------------------------------------------------------------------------
+func _on_placement_mode_changed(active: bool, building_id: String) -> void:
+	if not placement_ghost:
+		return
+	_clear_ghost_model()
 	if active:
+		_build_ghost_model(building_id)
 		is_dragging = false
 		if selection_box:
 			selection_box.visible = false
+	placement_ghost.visible = active
+	if placement_grid:
+		placement_grid.visible = active
+		if not active:
+			(placement_grid.mesh as ImmediateMesh).clear_surfaces()
+
+
+## Remove any previously-built ghost model and hide the default box mesh.
+func _clear_ghost_model() -> void:
+	if placement_ghost is MeshInstance3D:
+		placement_ghost.mesh = null
+	for c in placement_ghost.get_children():
+		if c.name == "GhostModel":
+			c.queue_free()
+
+
+## Instance the building's scene, lift out its FinishedMesh, and parent a copy
+## under the ghost. Using the real model means the ghost is automatically the
+## right shape and size. Falls back to a footprint-sized box if the scene has no
+## FinishedMesh OR its FinishedMesh contains no actual mesh (e.g. a half-built
+## scene), so every building always gets a visible ghost.
+func _build_ghost_model(building_id: String) -> void:
+	_ghost_footprint = 36.0 * Building.GLOBAL_BUILDING_SCALE
+	var path = BUILDING_SCENES.get(building_id)
+	if path == null:
+		_ghost_fallback_box(_ghost_footprint)
+		return
+	var packed := load(path) as PackedScene
+	if packed == null:
+		_ghost_fallback_box(_ghost_footprint)
+		return
+	var inst := packed.instantiate()
+
+	# Work out the size this building will actually be (its scene _ready hasn't
+	# run, so read the scene's collision shape and the scale we will apply).
+	var s : float = Building.GLOBAL_BUILDING_SCALE
+	if "building_scale" in inst and inst.building_scale > 0.0:
+		s = inst.building_scale
+	_ghost_footprint = _scene_footprint(inst, s)
+	_ghost_extents = _scene_extents(inst, s)
+
+	var finished = inst.get_node_or_null("FinishedMesh")
+	if finished and _node_has_mesh(finished):
+		var holder := finished.duplicate()
+		holder.name = "GhostModel"
+		holder.visible = true
+		holder.scale = Vector3.ONE * s   # FinishedMesh is scale 1 in every scene
+		placement_ghost.add_child(holder)
+	else:
+		_ghost_fallback_box(_ghost_footprint)
+	inst.queue_free()
+
+
+## Footprint radius for a freshly-instanced (not-yet-in-tree) building scene.
+func _scene_footprint(inst: Node, s: float) -> float:
+	var col = inst.get_node_or_null("CollisionShape3D")
+	var base := 36.0
+	if col and col.shape:
+		var sh = col.shape
+		if sh is BoxShape3D:
+			base = maxf(sh.size.x, sh.size.z) * 0.5
+		elif sh is CylinderShape3D:
+			base = sh.radius
+		elif sh is SphereShape3D:
+			base = sh.radius
+	return base * s
+
+
+## Footprint half-extents (x, z) for a freshly-instanced building scene.
+func _scene_extents(inst: Node, s: float) -> Vector2:
+	var col = inst.get_node_or_null("CollisionShape3D")
+	var hx := 24.0
+	var hz := 24.0
+	if col and col.shape:
+		var sh = col.shape
+		if sh is BoxShape3D:
+			hx = sh.size.x * 0.5
+			hz = sh.size.z * 0.5
+		elif sh is CylinderShape3D:
+			hx = sh.radius
+			hz = sh.radius
+	return Vector2(hx, hz) * s
+
+
+# ---------------------------------------------------------------------------
+# Grid snapping + overlay
+# ---------------------------------------------------------------------------
+## Snap a world position so the building's footprint aligns to grid cells: the
+## min corner lands on a grid line, so footprints that are whole numbers of
+## cells tile the raster edge-to-edge.
+func _snap_to_grid(pos: Vector3, ext: Vector2) -> Vector3:
+	var g := grid_cell()
+	var min_x := pos.x - ext.x
+	var min_z := pos.z - ext.y
+	min_x = roundf(min_x / g) * g
+	min_z = roundf(min_z / g) * g
+	return Vector3(min_x + ext.x, pos.y, min_z + ext.y)
+
+
+## Rebuild the little-squares overlay around the snapped position. Cheap enough
+## to redo each frame (a few hundred short line segments).
+func _draw_grid(center: Vector3, ok: bool) -> void:
+	if placement_grid == null:
+		return
+	var im := placement_grid.mesh as ImmediateMesh
+	im.clear_surfaces()
+	var g := grid_cell()
+	var n := GRID_RADIUS_CELLS
+	# Anchor lines to the same lattice the snap uses (multiples of g).
+	var cx := roundf(center.x / g) * g
+	var cz := roundf(center.z / g) * g
+	var y := 0.6
+	im.surface_begin(Mesh.PRIMITIVE_LINES)
+	for i in range(-n, n + 1):
+		var x := cx + i * g
+		im.surface_set_color(GRID_LINE_COLOR)
+		im.surface_add_vertex(Vector3(x, y, cz - n * g))
+		im.surface_add_vertex(Vector3(x, y, cz + n * g))
+		var z := cz + i * g
+		im.surface_add_vertex(Vector3(cx - n * g, y, z))
+		im.surface_add_vertex(Vector3(cx + n * g, y, z))
+	# Highlight the footprint the building would occupy.
+	var hi := GRID_LINE_COLOR_HI if ok else GHOST_INVALID_COLOR
+	var x0 := center.x - _ghost_extents.x
+	var x1 := center.x + _ghost_extents.x
+	var z0 := center.z - _ghost_extents.y
+	var z1 := center.z + _ghost_extents.y
+	var y2 := 0.8
+	for seg in [[Vector3(x0,y2,z0),Vector3(x1,y2,z0)], [Vector3(x1,y2,z0),Vector3(x1,y2,z1)],
+				[Vector3(x1,y2,z1),Vector3(x0,y2,z1)], [Vector3(x0,y2,z1),Vector3(x0,y2,z0)]]:
+		im.surface_set_color(hi)
+		im.surface_add_vertex(seg[0])
+		im.surface_add_vertex(seg[1])
+	im.surface_end()
+
+
+func _node_has_mesh(root: Node) -> bool:
+	if root is MeshInstance3D and root.mesh != null:
+		return true
+	for c in root.get_children():
+		if _node_has_mesh(c):
+			return true
+	return false
+
+
+## A grounded translucent box sized to the footprint, used when a scene has no
+## usable model to preview.
+func _ghost_fallback_box(footprint: float) -> void:
+	var mi := MeshInstance3D.new()
+	mi.name = "GhostModel"
+	var box := BoxMesh.new()
+	var h := maxf(footprint * 1.2, 40.0)
+	box.size = Vector3(footprint * 2.0, h, footprint * 2.0)
+	mi.mesh = box
+	mi.position.y = h * 0.5
+	placement_ghost.add_child(mi)
+
+
+## True if the candidate footprint would OVERLAP an existing building. Footprints
+## that only touch (share an edge in adjacent cells) are allowed, so the grid
+## tiles cleanly without buildings "blocking" their neighbours.
+func _overlaps_existing_building(world_pos: Vector3, ext: Vector2, exclude :Variant = null) -> bool:
+	var eps := 1.0   # shrink so exact edge-touching is not counted as overlap
+	for b in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(b) or b == exclude:
+			continue
+		var be := Vector2(24, 24)
+		if b.has_method("footprint_extents"):
+			be = b.footprint_extents()
+		var dx := absf(world_pos.x - b.global_position.x)
+		var dz := absf(world_pos.z - b.global_position.z)
+		if dx < ext.x + be.x - eps and dz < ext.y + be.y - eps:
+			return true
+	return false
+
+
+## Apply the valid/invalid tint to every mesh under the ghost (box or model).
+func _tint_ghost(root: Node, ok: bool) -> void:
+	if root is GeometryInstance3D:
+		var m := StandardMaterial3D.new()
+		m.albedo_color = GHOST_VALID_COLOR if ok else GHOST_INVALID_COLOR
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		root.material_override = m
+	for c in root.get_children():
+		_tint_ghost(c, ok)
 
 
 # ---------------------------------------------------------------------------
@@ -427,8 +693,21 @@ func _is_over_ui(screen_pos: Vector2) -> bool:
 	var ui = get_tree().current_scene.get_node_or_null("UI")
 	if ui == null:
 		return false
-	for panel_name in ["TopBar", "SelectionPanel", "BuildMenu", "TimePanel"]:
-		var panel = ui.get_node_or_null(panel_name)
-		if panel and panel.visible and panel.get_global_rect().has_point(screen_pos):
+	return _ui_blocks(ui, screen_pos)
+
+
+## Recursively true if any visible Control under `node` that isn't click-through
+## contains the point. Future-proof: new panels/buttons are picked up
+## automatically without editing a hardcoded list.
+func _ui_blocks(node: Node, screen_pos: Vector2) -> bool:
+	for child in node.get_children():
+		if child is Control:
+			var c := child as Control
+			if c.visible and c.mouse_filter != Control.MOUSE_FILTER_IGNORE \
+					and c.get_global_rect().has_point(screen_pos):
+				return true
+			if c.visible and _ui_blocks(c, screen_pos):
+				return true
+		elif _ui_blocks(child, screen_pos):
 			return true
 	return false

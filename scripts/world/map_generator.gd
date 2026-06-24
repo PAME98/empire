@@ -177,7 +177,13 @@ func _ready() -> void:
 	_generate_forests()
 
 	await _bake_navigation()
-	_begin_placement()
+	# Town founding is owned by start_placement.tscn (its own ghost + click).
+	# Calling _begin_placement() here as well drove a SECOND ghost on the shared
+	# PlacementGhost node; after you placed the village centre that ghost kept
+	# following the cursor and turned red over the now-occupied spot. Disabled
+	# while start_placement.tscn is in the scene. If you ever remove that node
+	# and go back to map-gen founding, just uncomment the line below.
+	#_begin_placement()
 
 
 func _configure_noises() -> void:

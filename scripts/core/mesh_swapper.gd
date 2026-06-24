@@ -1,9 +1,20 @@
 extends Node
 
+## Runtime mesh swapper for world props. Listens for nodes entering the tree and,
+## if their script is in SWAP_TABLE, replaces a placeholder mesh with a random
+## Kenney GLB.
+##
+## NOTE ON BUILDINGS: building scenes now embed their Kenney models directly in
+## their FinishedMesh (see village_center.tscn / mill.tscn / house_variant_*.tscn
+## etc.), so the swapper no longer touches buildings. Driving buildings from BOTH
+## the scene AND the swapper is what caused "only some models show": for scenes
+## whose FinishedMesh is a Node3D the old swapper bailed out with a warning, and
+## for box-placeholder scenes it tried to load building GLBs that may not exist.
+## Buildings are embedded; this autoload only handles trees and mountains.
+
 const ATLAS := "res://assets/kenney/textures/colormap.png"
 const BASE         := "res://assets/kenney/models/"
 const BASE_NATURE  := "res://assets/kenney/nature/models/"
-const BASE_BUILDINGS := "res://assets/kenney/buildings/"
 
 const SWAP_TABLE: Dictionary = {
 	"res://scripts/world/resource_node.gd": {
@@ -32,163 +43,6 @@ const SWAP_TABLE: Dictionary = {
 		"scale": 80.0,
 		"apply_atlas": true,
 		"models": ["rock-large.glb","rock-wide.glb"],
-		"y_offset": 0.0,
-	},
-	"res://scripts/buildings/house.gd": {
-		"target": "FinishedMesh",
-		"base": BASE_BUILDINGS,
-		"scale": 90.0,
-		"apply_atlas": false,
-		"models": [
-			"house_variant_a.glb",
-			"house_variant_b.glb",
-			"house_variant_c.glb",
-			"house_variant_d.glb",
-		],
-		"y_offset": 0.0,
-	},
-	"res://scripts/buildings/farm.gd": {
-		"target": "FinishedMesh",
-		"base": BASE_BUILDINGS,
-		"scale": 90.0,
-		"apply_atlas": false,
-		"models": ["farm.glb"],
-		"y_offset": 0.0,
-	},
-	"res://scripts/buildings/grain_farm.gd": {
-		"target": "FinishedMesh",
-		"base": BASE_BUILDINGS,
-		"scale": 90.0,
-		"apply_atlas": false,
-		"models": ["grain_farm.glb"],
-		"y_offset": 0.0,
-	},
-	"res://scripts/buildings/veg_garden.gd": {
-		"target": "FinishedMesh",
-		"base": BASE_BUILDINGS,
-		"scale": 90.0,
-		"apply_atlas": false,
-		"models": ["veg_garden.glb"],
-		"y_offset": 0.0,
-	},
-	"res://scripts/buildings/hunter.gd": {
-		"target": "FinishedMesh",
-		"base": BASE_BUILDINGS,
-		"scale": 90.0,
-		"apply_atlas": false,
-		"models": ["hunter.glb"],
-		"y_offset": 0.0,
-	},
-	"res://scripts/buildings/lumber_camp.gd": {
-		"target": "FinishedMesh",
-		"base": BASE_BUILDINGS,
-		"scale": 90.0,
-		"apply_atlas": false,
-		"models": ["lumber_camp.glb"],
-		"y_offset": 0.0,
-	},
-	"res://scripts/buildings/quarry.gd": {
-		"target": "FinishedMesh",
-		"base": BASE_BUILDINGS,
-		"scale": 90.0,
-		"apply_atlas": false,
-		"models": ["quarry.glb"],
-		"y_offset": 0.0,
-	},
-	"res://scripts/buildings/mine.gd": {
-		"target": "FinishedMesh",
-		"base": BASE_BUILDINGS,
-		"scale": 90.0,
-		"apply_atlas": false,
-		"models": ["mine.glb"],
-		"y_offset": 0.0,
-	},
-	"res://scripts/buildings/herbalist.gd": {
-		"target": "FinishedMesh",
-		"base": BASE_BUILDINGS,
-		"scale": 90.0,
-		"apply_atlas": false,
-		"models": ["herbalist.glb"],
-		"y_offset": 0.0,
-	},
-	"res://scripts/buildings/well.gd": {
-		"target": "FinishedMesh",
-		"base": BASE_BUILDINGS,
-		"scale": 90.0,
-		"apply_atlas": false,
-		"models": ["well.glb"],
-		"y_offset": 0.0,
-	},
-	"res://scripts/buildings/charcoal_kiln.gd": {
-		"target": "FinishedMesh",
-		"base": BASE_BUILDINGS,
-		"scale": 90.0,
-		"apply_atlas": false,
-		"models": ["charcoal_kiln.glb"],
-		"y_offset": 0.0,
-	},
-	"res://scripts/buildings/mill.gd": {
-		"target": "FinishedMesh",
-		"base": BASE_BUILDINGS,
-		"scale": 90.0,
-		"apply_atlas": false,
-		"models": ["mill.glb"],
-		"y_offset": 0.0,
-	},
-	"res://scripts/buildings/bakery.gd": {
-		"target": "FinishedMesh",
-		"base": BASE_BUILDINGS,
-		"scale": 90.0,
-		"apply_atlas": false,
-		"models": ["bakery.glb"],
-		"y_offset": 0.0,
-	},
-	"res://scripts/buildings/sawmill.gd": {
-		"target": "FinishedMesh",
-		"base": BASE_BUILDINGS,
-		"scale": 90.0,
-		"apply_atlas": false,
-		"models": ["sawmill.glb"],
-		"y_offset": 0.0,
-	},
-	"res://scripts/buildings/smelter.gd": {
-		"target": "FinishedMesh",
-		"base": BASE_BUILDINGS,
-		"scale": 90.0,
-		"apply_atlas": false,
-		"models": ["smelter.glb"],
-		"y_offset": 0.0,
-	},
-	"res://scripts/buildings/blacksmith.gd": {
-		"target": "FinishedMesh",
-		"base": BASE_BUILDINGS,
-		"scale": 90.0,
-		"apply_atlas": false,
-		"models": ["blacksmith.glb"],
-		"y_offset": 0.0,
-	},
-	"res://scripts/buildings/apothecary.gd": {
-		"target": "FinishedMesh",
-		"base": BASE_BUILDINGS,
-		"scale": 90.0,
-		"apply_atlas": false,
-		"models": ["apothecary.glb"],
-		"y_offset": 0.0,
-	},
-	"res://scripts/buildings/barracks.gd": {
-		"target": "FinishedMesh",
-		"base": BASE_BUILDINGS,
-		"scale": 90.0,
-		"apply_atlas": false,
-		"models": ["barracks.glb"],
-		"y_offset": 0.0,
-	},
-	"res://scripts/buildings/village_center.gd": {
-		"target": "FinishedMesh",
-		"base": BASE_BUILDINGS,
-		"scale": 90.0,
-		"apply_atlas": false,
-		"models": ["village_center.glb"],
 		"y_offset": 0.0,
 	},
 }
@@ -248,9 +102,17 @@ func _do_swap(node: Node, script_path: String) -> void:
 
 
 func _swap_mesh(node: Node, glb_path: String, y_offset: float, target_name: String, scale: float, apply_atlas: bool) -> void:
-	var target := node.get_node_or_null(target_name) as MeshInstance3D
-	if target == null:
+	var target_node := node.get_node_or_null(target_name)
+	if target_node == null:
 		push_warning("MeshSwapper: no " + target_name + " on " + node.name)
+		return
+	# Accept either a MeshInstance3D placeholder or a Node3D holder whose first
+	# child mesh is the placeholder.
+	var target := target_node as MeshInstance3D
+	if target == null:
+		target = _find_first_mesh(target_node)
+	if target == null:
+		push_warning("MeshSwapper: no mesh under " + target_name + " on " + node.name)
 		return
 	var packed := load(glb_path) as PackedScene
 	if packed == null:

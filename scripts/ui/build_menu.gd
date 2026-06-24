@@ -1,20 +1,14 @@
 extends Panel
 class_name BuildMenu
 
-## Single-source-of-truth build menu. Every placeable building is one row in
-## CATALOG; the menu builds itself into per-category grids, each card showing a
-## colour swatch that matches the building's in-world mesh, the name, and its
-## cost as a tooltip. Cards grey out when unaffordable or while you're busy
-## placing/demolishing. A Demolish toggle at the bottom enters removal mode.
+## Openable, centered, semi-transparent build menu. Hidden by default; opened by
+## a "Build" launcher button (added to the UI automatically) or the B key, and
+## closed with the launcher, the X, Escape, the dimmed backdrop, or by picking a
+## building. Replaces the old always-on bottom bar.
 ##
-## Adding a building later = one CATALOG row (+ its scene path in
+## Adding a building = one CATALOG row (+ its scene path in
 ## camera_controller.BUILDING_SCENES and cost in GameManager.COSTS).
-##
-## Builds its own scroll/grid at runtime, so the scene is just a Panel — no
-## fragile @onready node paths to keep in sync.
 
-# id, label, category, swatch colour (match each building's FinishedMesh albedo;
-# tweak freely — this only drives the swatch).
 var CATALOG := [
 	{"id": "house",         "label": "House",            "cat": "Housing",       "color": Color(0.80, 0.72, 0.55)},
 	{"id": "farm",          "label": "Forager's Hut",    "cat": "Food",          "color": Color(0.85, 0.78, 0.25)},
@@ -39,37 +33,108 @@ var CATALOG := [
 const CATEGORY_ORDER := ["Housing", "Food", "Raw Materials", "Workshops", "Military"]
 const GRID_COLUMNS := 2
 
-var _buttons: Dictionary = {}   # id -> Button (the build cards)
+var _buttons: Dictionary = {}
 var _demolish_btn: Button = null
+var _launcher: Button = null
+var _backdrop: ColorRect = null
 
 
 func _ready() -> void:
-	custom_minimum_size = Vector2(280, 380)
-	_build_ui()
+	theme = HudTheme.build()
+	# Centered popup.
+	anchor_left = 0.5; anchor_right = 0.5; anchor_top = 0.5; anchor_bottom = 0.5
+	offset_left = -270.0; offset_right = 270.0; offset_top = -290.0; offset_bottom = 290.0
+	z_index = 2
+	visible = false
 
-	GameManager.resources_changed.connect(func(_a, _b, _c, _d, _e, _f, _g, _h): _refresh())
-	GameManager.placement_mode_changed.connect(func(_active, _id): _refresh())
-	# These two require the GameManager demolish patch (see the .md). If you
-	# haven't added them yet, comment this line out to load the menu.
-	GameManager.demolish_mode_changed.connect(_on_demolish_mode_changed)
+	_build_backdrop()
+	_build_ui()
+	_build_launcher()
+
+	GameManager.resources_changed.connect(func(_a,_b,_c,_d,_e,_f,_g,_h): _refresh())
+	GameManager.placement_mode_changed.connect(func(_active,_id): _refresh())
+	if GameManager.has_signal("demolish_mode_changed"):
+		GameManager.demolish_mode_changed.connect(_on_demolish_mode_changed)
 	_refresh()
 
 
+# ---- open / close ----------------------------------------------------------
+func open() -> void:
+	visible = true
+	if _backdrop: _backdrop.visible = true
+	if _launcher: _launcher.text = "Build  ✕"
+	_refresh()
+
+func close() -> void:
+	visible = false
+	if _backdrop: _backdrop.visible = false
+	if _launcher: _launcher.text = "Build  (B)"
+
+func toggle() -> void:
+	if visible: close()
+	else: open()
+
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_B:
+			toggle()
+			get_viewport().set_input_as_handled()
+		elif event.keycode == KEY_ESCAPE and visible:
+			close()
+			get_viewport().set_input_as_handled()
+
+
+func _build_backdrop() -> void:
+	_backdrop = ColorRect.new()
+	_backdrop.name = "BuildBackdrop"
+	_backdrop.color = Color(0, 0, 0, 0.40)
+	_backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_backdrop.z_index = 1
+	_backdrop.visible = false
+	_backdrop.gui_input.connect(func(e):
+		if e is InputEventMouseButton and e.pressed:
+			close())
+	get_parent().add_child.call_deferred(_backdrop)
+
+
+func _build_launcher() -> void:
+	_launcher = Button.new()
+	_launcher.name = "BuildToggle"
+	_launcher.theme = HudTheme.build()
+	_launcher.text = "Build  (B)"
+	_launcher.anchor_left = 0.0; _launcher.anchor_right = 0.0
+	_launcher.anchor_top = 1.0; _launcher.anchor_bottom = 1.0
+	_launcher.offset_left = 12.0; _launcher.offset_right = 134.0
+	_launcher.offset_top = -46.0; _launcher.offset_bottom = -12.0
+	_launcher.pressed.connect(toggle)
+	get_parent().add_child.call_deferred(_launcher)
+
+
+# ---- menu contents ---------------------------------------------------------
 func _build_ui() -> void:
 	var margin := MarginContainer.new()
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
 	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 8)
+		margin.add_theme_constant_override("margin_" + side, 6)
 	add_child(margin)
 
 	var root := VBoxContainer.new()
-	root.add_theme_constant_override("separation", 6)
+	root.add_theme_constant_override("separation", 8)
 	margin.add_child(root)
 
+	var header := HBoxContainer.new()
+	root.add_child(header)
 	var title := Label.new()
 	title.text = "Build"
-	title.add_theme_font_size_override("font_size", 18)
-	root.add_child(title)
+	title.add_theme_font_size_override("font_size", 20)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(title)
+	var close_btn := Button.new()
+	close_btn.text = "✕"
+	close_btn.custom_minimum_size = Vector2(34, 0)
+	close_btn.pressed.connect(close)
+	header.add_child(close_btn)
 
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -78,60 +143,57 @@ func _build_ui() -> void:
 
 	var list := VBoxContainer.new()
 	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	list.add_theme_constant_override("separation", 4)
+	list.add_theme_constant_override("separation", 6)
 	scroll.add_child(list)
 
 	for cat in _ordered_categories():
-		var header := Label.new()
-		header.text = cat
-		header.add_theme_font_size_override("font_size", 13)
-		header.modulate = Color(0.72, 0.78, 0.9)
-		list.add_child(header)
+		var hdr := Label.new()
+		hdr.text = cat.to_upper()
+		hdr.add_theme_font_size_override("font_size", 12)
+		hdr.add_theme_color_override("font_color", HudTheme.TEXT_DIM)
+		list.add_child(hdr)
 
 		var grid := GridContainer.new()
 		grid.columns = GRID_COLUMNS
 		grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		grid.add_theme_constant_override("h_separation", 4)
-		grid.add_theme_constant_override("v_separation", 4)
+		grid.add_theme_constant_override("h_separation", 6)
+		grid.add_theme_constant_override("v_separation", 6)
 		list.add_child(grid)
 
 		for entry in CATALOG:
 			if entry["cat"] == cat:
 				grid.add_child(_make_card(entry))
 
-	# Demolish toggle, pinned under the scroll area.
 	_demolish_btn = Button.new()
 	_demolish_btn.text = "Demolish"
 	_demolish_btn.toggle_mode = true
-	_demolish_btn.modulate = Color(1.0, 0.7, 0.7)
+	_demolish_btn.modulate = Color(1.0, 0.78, 0.78)
 	_demolish_btn.pressed.connect(_on_demolish_pressed)
 	root.add_child(_demolish_btn)
 
 
 func _make_card(entry: Dictionary) -> Button:
 	var card := Button.new()
-	card.custom_minimum_size = Vector2(0, 34)
+	card.custom_minimum_size = Vector2(0, 44)
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	card.clip_text = true
 	card.tooltip_text = "%s\n%s" % [entry["label"], _cost_text(entry["id"])]
 
-	# A swatch + label laid over the button. mouse_filter IGNORE so the click
-	# still lands on the button underneath.
 	var pad := MarginContainer.new()
 	pad.set_anchors_preset(Control.PRESET_FULL_RECT)
 	pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	pad.add_theme_constant_override("margin_left", 8)
-	pad.add_theme_constant_override("margin_right", 6)
+	pad.add_theme_constant_override("margin_left", 10)
+	pad.add_theme_constant_override("margin_right", 8)
 	card.add_child(pad)
 
 	var hb := HBoxContainer.new()
 	hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hb.add_theme_constant_override("separation", 8)
+	hb.add_theme_constant_override("separation", 10)
 	pad.add_child(hb)
 
 	var sw := ColorRect.new()
 	sw.color = entry["color"]
-	sw.custom_minimum_size = Vector2(14, 14)
+	sw.custom_minimum_size = Vector2(18, 18)
 	sw.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	sw.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hb.add_child(sw)
@@ -140,7 +202,7 @@ func _make_card(entry: Dictionary) -> Button:
 	lbl.text = entry["label"]
 	lbl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	lbl.add_theme_font_size_override("font_size", 12)
+	lbl.add_theme_font_size_override("font_size", 13)
 	hb.add_child(lbl)
 
 	var id: String = entry["id"]
@@ -198,6 +260,7 @@ func _start_placement(building_id: String) -> void:
 	if GameManager.selected_units.size() == 1 and GameManager.selected_units[0] is Citizen:
 		builder = GameManager.selected_units[0]
 	GameManager.start_building_placement(building_id, builder)
+	close()
 
 
 func _on_demolish_pressed() -> void:

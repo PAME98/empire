@@ -9,6 +9,7 @@
 [ext_resource type="Script" uid="uid://ryj3wh71g50v" path="res://scripts/ui/ui_controller.gd" id="6_ui"]
 [ext_resource type="PackedScene" path="res://scenes/units/citizen.tscn" id="7_citizen"]
 [ext_resource type="Script" uid="uid://b23jp0da2u5ms" path="res://scripts/world/map_generator.gd" id="9_85g3d"]
+[ext_resource type="Script" uid="uid://d0ri57m1quegx" path="res://scenes/ui/hud_skin.gd" id="9_ocd3q"]
 [ext_resource type="PackedScene" path="res://scenes/world/start_placement.tscn" id="10_fu2j5"]
 
 [sub_resource type="Environment" id="Env"]
@@ -389,6 +390,9 @@ visible = false
 offset_right = 40.0
 offset_bottom = 40.0
 color = Color(0.2, 0.55, 1, 0.25)
+
+[node name="HudSkin" type="Node" parent="UI" unique_id=1355352797]
+script = ExtResource("9_ocd3q")
 
 [node name="MapGenerator" type="Node3D" parent="." unique_id=1138111598]
 script = ExtResource("9_85g3d")
