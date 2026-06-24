@@ -1,0 +1,107 @@
+[gd_scene load_steps=12 format=3]
+
+[ext_resource type="Script" path="res://scripts/buildings/apothecary.gd" id="1_s"]
+[ext_resource type="PackedScene" path="res://assets/kenney/models/planks.glb" id="1_planks"]
+[ext_resource type="PackedScene" path="res://assets/kenney/models/wall-wood-corner.glb" id="2_wall_wood_corner"]
+[ext_resource type="PackedScene" path="res://assets/kenney/models/wall-wood.glb" id="3_wall_wood"]
+[ext_resource type="PackedScene" path="res://assets/kenney/models/wall-wood-door.glb" id="4_wall_wood_door"]
+[ext_resource type="PackedScene" path="res://assets/kenney/models/roof-gable.glb" id="5_roof_gable"]
+[ext_resource type="PackedScene" path="res://assets/kenney/models/roof-gable-end.glb" id="6_roof_gable_end"]
+
+[sub_resource type="BoxShape3D" id="Shape"]
+size = Vector3(48, 25.12, 32)
+
+[sub_resource type="StandardMaterial3D" id="SelectionRing_mat"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(0, 1, 0, 0.5)
+
+[sub_resource type="CylinderMesh" id="SelectionRing_mesh"]
+top_radius = 29.76
+bottom_radius = 29.76
+height = 0.5
+material = SubResource("SelectionRing_mat")
+
+[node name="Apothecary" type="StaticBody3D" groups=["buildings", "apothecaries"]]
+script = ExtResource("1_s")
+build_time = 6
+
+[node name="FinishedMesh" type="Node3D" parent="."]
+
+[node name="Floor" parent="FinishedMesh" instance=ExtResource("1_planks")]
+transform = Transform3D(16, 0, 0, 0, 16, 0, 0, 0, 16, -16, 0, -8)
+
+[node name="Floor2" parent="FinishedMesh" instance=ExtResource("1_planks")]
+transform = Transform3D(16, 0, 0, 0, 16, 0, 0, 0, 16, -16, 0, 8)
+
+[node name="Floor3" parent="FinishedMesh" instance=ExtResource("1_planks")]
+transform = Transform3D(16, 0, 0, 0, 16, 0, 0, 0, 16, 0, 0, -8)
+
+[node name="Floor4" parent="FinishedMesh" instance=ExtResource("1_planks")]
+transform = Transform3D(16, 0, 0, 0, 16, 0, 0, 0, 16, 0, 0, 8)
+
+[node name="Floor5" parent="FinishedMesh" instance=ExtResource("1_planks")]
+transform = Transform3D(16, 0, 0, 0, 16, 0, 0, 0, 16, 16, 0, -8)
+
+[node name="Floor6" parent="FinishedMesh" instance=ExtResource("1_planks")]
+transform = Transform3D(16, 0, 0, 0, 16, 0, 0, 0, 16, 16, 0, 8)
+
+[node name="WallCorner" parent="FinishedMesh" instance=ExtResource("2_wall_wood_corner")]
+transform = Transform3D(16, 0, 0, 0, 16, 0, 0, 0, 16, 16, 0, 8)
+
+[node name="WallCorner2" parent="FinishedMesh" instance=ExtResource("2_wall_wood_corner")]
+transform = Transform3D(0, 0, -16, 0, 16, 0, 16, 0, 0, 16, 0, -8)
+
+[node name="WallCorner3" parent="FinishedMesh" instance=ExtResource("2_wall_wood_corner")]
+transform = Transform3D(-16, 0, 0, 0, 16, 0, 0, 0, -16, -16, 0, -8)
+
+[node name="WallCorner4" parent="FinishedMesh" instance=ExtResource("2_wall_wood_corner")]
+transform = Transform3D(0, 0, 16, 0, 16, 0, -16, 0, 0, -16, 0, 8)
+
+[node name="WallN" parent="FinishedMesh" instance=ExtResource("3_wall_wood")]
+transform = Transform3D(0, 0, 16, 0, 16, 0, -16, 0, 0, 0, 0, 8)
+
+[node name="WallS" parent="FinishedMesh" instance=ExtResource("4_wall_wood_door")]
+transform = Transform3D(0, 0, -16, 0, 16, 0, 16, 0, 0, 0, 0, -8)
+
+[node name="Roof" parent="FinishedMesh" instance=ExtResource("5_roof_gable")]
+transform = Transform3D(16, 0, 0, 0, 16, 0, 0, 0, 16, -16, 16, -8)
+
+[node name="Roof2" parent="FinishedMesh" instance=ExtResource("5_roof_gable")]
+transform = Transform3D(16, 0, 0, 0, 16, 0, 0, 0, 16, 0, 16, -8)
+
+[node name="Roof3" parent="FinishedMesh" instance=ExtResource("5_roof_gable")]
+transform = Transform3D(16, 0, 0, 0, 16, 0, 0, 0, 16, 16, 16, -8)
+
+[node name="RoofEndE" parent="FinishedMesh" instance=ExtResource("6_roof_gable_end")]
+transform = Transform3D(16, 0, 0, 0, 16, 0, 0, 0, 16, 16, 16, -8)
+
+[node name="RoofEndW" parent="FinishedMesh" instance=ExtResource("6_roof_gable_end")]
+transform = Transform3D(-16, 0, 0, 0, 16, 0, 0, 0, -16, -16, 16, -8)
+
+[node name="Roof4" parent="FinishedMesh" instance=ExtResource("5_roof_gable")]
+transform = Transform3D(16, 0, 0, 0, 16, 0, 0, 0, 16, -16, 16, 8)
+
+[node name="Roof5" parent="FinishedMesh" instance=ExtResource("5_roof_gable")]
+transform = Transform3D(16, 0, 0, 0, 16, 0, 0, 0, 16, 0, 16, 8)
+
+[node name="Roof6" parent="FinishedMesh" instance=ExtResource("5_roof_gable")]
+transform = Transform3D(16, 0, 0, 0, 16, 0, 0, 0, 16, 16, 16, 8)
+
+[node name="RoofEndE2" parent="FinishedMesh" instance=ExtResource("6_roof_gable_end")]
+transform = Transform3D(16, 0, 0, 0, 16, 0, 0, 0, 16, 16, 16, 8)
+
+[node name="RoofEndW2" parent="FinishedMesh" instance=ExtResource("6_roof_gable_end")]
+transform = Transform3D(-16, 0, 0, 0, 16, 0, 0, 0, -16, -16, 16, 8)
+
+[node name="ConstructionMesh" type="MeshInstance3D" parent="."]
+visible = false
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 12.56, 0)
+shape = SubResource("Shape")
+
+[node name="SelectionRing" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0)
+visible = false
+mesh = SubResource("SelectionRing_mesh")

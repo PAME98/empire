@@ -1,16 +1,10 @@
 [gd_scene format=3 uid="uid://dt5pdg4nyth2j"]
 
 [ext_resource type="Script" uid="uid://b5uxoyh4mfw6b" path="res://scripts/buildings/farm.gd" id="1_s"]
-
-[sub_resource type="StandardMaterial3D" id="FinMat"]
-albedo_color = Color(0.85, 0.78, 0.25, 1)
-
-[sub_resource type="BoxMesh" id="FinMesh"]
-material = SubResource("FinMat")
-size = Vector3(64, 18, 64)
+[ext_resource type="PackedScene" uid="uid://cmrv1ljtqovyn" path="res://scenes/buildings/barracks.tscn" id="2_acyy7"]
 
 [sub_resource type="BoxShape3D" id="Shape"]
-size = Vector3(64, 18, 64)
+size = Vector3(64, 79.36, 64)
 
 [sub_resource type="StandardMaterial3D" id="SelectionRing_mat"]
 transparency = 1
@@ -23,22 +17,25 @@ top_radius = 40.0
 bottom_radius = 40.0
 height = 0.5
 
-[node name="Farm" type="StaticBody3D" unique_id=649887934 groups=["buildings", "farms", "food_sources"]]
+[node name="Farm" type="StaticBody3D" unique_id=1579469304 groups=["buildings", "farms", "food_sources"]]
 script = ExtResource("1_s")
 
-[node name="FinishedMesh" type="MeshInstance3D" parent="." unique_id=1261180331]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 9, 0)
-mesh = SubResource("FinMesh")
+[node name="FinishedMesh" type="Node3D" parent="." unique_id=88048853]
 
-[node name="ConstructionMesh" type="MeshInstance3D" parent="." unique_id=644238626]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 9, 0)
+[node name="Model" parent="FinishedMesh" unique_id=1310267689]
+transform = Transform3D(64, 0, 0, 0, 64, 0, 0, 0, 64, 0, 0, 0)
+
+[node name="ConstructionMesh" type="MeshInstance3D" parent="." unique_id=531274005]
 visible = false
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1490684069]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 9, 0)
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=2080956001]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 39.68, 0)
 shape = SubResource("Shape")
 
-[node name="SelectionRing" type="MeshInstance3D" parent="." unique_id=565748292]
+[node name="SelectionRing" type="MeshInstance3D" parent="." unique_id=904976312]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0)
 visible = false
 mesh = SubResource("SelectionRing_mesh")
+
+[node name="Barracks" parent="." unique_id=309166962 instance=ExtResource("2_acyy7")]
+build_time = 10.0

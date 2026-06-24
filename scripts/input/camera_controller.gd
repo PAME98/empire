@@ -83,7 +83,17 @@ func _process(delta: float) -> void:
 		rotation.y -= rotate_speed * delta
 
 	if GameManager.is_placing_building and placement_ghost and placement_ghost.visible:
-		placement_ghost.global_position = _ground_point(_mouse())
+		var gp := _ground_point(_mouse())
+		placement_ghost.global_position = gp
+		var ok := GameManager.placement_building_id in ["quarry", "mine"] \
+		or GameManager.can_place_building_at(gp)
+		var gmat := placement_ghost.material_override as StandardMaterial3D
+		if gmat == null:
+			gmat = StandardMaterial3D.new()
+			gmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			gmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			placement_ghost.material_override = gmat
+			gmat.albedo_color = Color(0.2, 0.9, 0.2, 0.45) if ok else Color(0.9, 0.15, 0.15, 0.45)
 
 	if GameManager.is_targeting_attack_position and attack_area_ghost and attack_area_ghost.visible:
 		attack_area_ghost.global_position = _ground_point(_mouse())
@@ -320,6 +330,7 @@ func _confirm_placement() -> void:
 	var building = load(scene_path).instantiate()
 	get_tree().current_scene.get_node("Buildings").add_child(building)
 	building.global_position = placement_pos
+	GameManager.clear_trees_at(placement_pos, 44.0)
 
 	if building is ResourceBuilding and building.deposit_group != "":
 		if not building.bind_to_deposit(64.0):

@@ -312,29 +312,53 @@ func cancel_building_placement() -> void:
 ## `footprint_radius` should be roughly half the building's largest XZ
 ## dimension (e.g. farm.tscn's 64x64 footprint -> ~36 to include a margin).
 func can_place_building_at(world_pos: Vector3, footprint_radius: float = 36.0) -> bool:
-	var space_state :Variant = Engine.get_main_loop().current_scene.get_world_3d().direct_space_state
+	# Coastline check: must be on land (this is what blocks the ocean).
+	var map_gen = Engine.get_main_loop().current_scene.get_node_or_null("MapGenerator")
+	if map_gen and map_gen.has_method("is_land_at"):
+		if not map_gen.is_land_at(Vector2(world_pos.x, world_pos.z)):
+			return false
+ 
+	var space_state = Engine.get_main_loop().current_scene.get_world_3d().direct_space_state
 	var query := PhysicsShapeQueryParameters3D.new()
 	var shape := CylinderShape3D.new()
 	shape.radius = footprint_radius
 	shape.height = 40.0
 	query.shape = shape
 	query.transform = Transform3D(Basis.IDENTITY, world_pos)
-	# Layer 1 is where mountains/trees/rivers/buildings all live (their
-	# default StaticBody3D collision_layer). Units are excluded by checking
-	# group membership below so a citizen standing on the spot doesn't block
-	# its own building.
 	query.collision_mask = 1
-
-	var hits :Variant = space_state.intersect_shape(query, 8)
+ 
+	var hits = space_state.intersect_shape(query, 16)
 	for hit in hits:
 		var collider = hit.get("collider")
 		if collider == null:
 			continue
-		if collider.is_in_group("rivers") or collider.is_in_group("mountains") \
-				or collider.is_in_group("resources") or collider.is_in_group("buildings"):
+		# Trees (wood_sources) are intentionally NOT blocking — they get
+		# cleared on build. Only hard obstacles block.
+		if collider.is_in_group("mountains") \
+				or collider.is_in_group("rivers") \
+				or collider.is_in_group("water_sources") \
+				or collider.is_in_group("buildings"):
 			return false
 	return true
 
+# Removes any trees overlapping the footprint (call right after placing a
+# building, and when founding the town on a forest).
+func clear_trees_at(world_pos: Vector3, radius: float = 44.0) -> void:
+	var space_state = Engine.get_main_loop().current_scene.get_world_3d().direct_space_state
+	var query := PhysicsShapeQueryParameters3D.new()
+	var shape := CylinderShape3D.new()
+	shape.radius = radius
+	shape.height = 60.0
+	query.shape = shape
+	query.transform = Transform3D(Basis.IDENTITY, world_pos)
+	query.collision_mask = 1
+ 
+	var hits = space_state.intersect_shape(query, 32)
+	for hit in hits:
+		var collider = hit.get("collider")
+		if collider and is_instance_valid(collider) and collider.is_in_group("wood_sources"):
+			collider.queue_free()
+ 
 
 # ---------------------------------------------------------------------------
 # Artillery attack-position targeting mode

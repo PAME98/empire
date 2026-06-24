@@ -1,44 +1,111 @@
-[gd_scene format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="Script" path="res://scripts/buildings/smelter.gd" id="1_s"]
-
-[sub_resource type="StandardMaterial3D" id="FinMat"]
-albedo_color = Color(0.55, 0.30, 0.25, 1)
-
-[sub_resource type="BoxMesh" id="FinMesh"]
-material = SubResource("FinMat")
-size = Vector3(64, 18, 64)
+[ext_resource type="PackedScene" path="res://assets/kenney/models/planks.glb" id="1_planks"]
+[ext_resource type="PackedScene" path="res://assets/kenney/models/wall-corner.glb" id="2_wall_corner"]
+[ext_resource type="PackedScene" path="res://assets/kenney/models/wall.glb" id="3_wall"]
+[ext_resource type="PackedScene" path="res://assets/kenney/models/wall-door.glb" id="4_wall_door"]
+[ext_resource type="PackedScene" path="res://assets/kenney/models/roof-high-gable.glb" id="5_roof_high_gable"]
+[ext_resource type="PackedScene" path="res://assets/kenney/models/roof-high-gable-end.glb" id="6_roof_high_gable_end"]
+[ext_resource type="PackedScene" path="res://assets/kenney/models/chimney.glb" id="7_chimney"]
 
 [sub_resource type="BoxShape3D" id="Shape"]
-size = Vector3(64, 18, 64)
+size = Vector3(51, 35.87, 34)
 
-[sub_resource type="StandardMaterial3D" id="RingMat"]
+[sub_resource type="StandardMaterial3D" id="SelectionRing_mat"]
 transparency = 1
 shading_mode = 0
 albedo_color = Color(0, 1, 0, 0.5)
 
-[sub_resource type="CylinderMesh" id="RingMesh"]
-material = SubResource("RingMat")
-top_radius = 40.0
-bottom_radius = 40.0
+[sub_resource type="CylinderMesh" id="SelectionRing_mesh"]
+top_radius = 31.62
+bottom_radius = 31.62
 height = 0.5
+material = SubResource("SelectionRing_mat")
 
-[node name="Smelter" type="StaticBody3D" groups=["buildings"]]
+[node name="Smelter" type="StaticBody3D" groups=["buildings", "smelters"]]
 script = ExtResource("1_s")
+build_time = 8
 
-[node name="FinishedMesh" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 9, 0)
-mesh = SubResource("FinMesh")
+[node name="FinishedMesh" type="Node3D" parent="."]
+
+[node name="Floor" parent="FinishedMesh" instance=ExtResource("1_planks")]
+transform = Transform3D(17, 0, 0, 0, 17, 0, 0, 0, 17, -17, 0, -8.5)
+
+[node name="Floor2" parent="FinishedMesh" instance=ExtResource("1_planks")]
+transform = Transform3D(17, 0, 0, 0, 17, 0, 0, 0, 17, -17, 0, 8.5)
+
+[node name="Floor3" parent="FinishedMesh" instance=ExtResource("1_planks")]
+transform = Transform3D(17, 0, 0, 0, 17, 0, 0, 0, 17, 0, 0, -8.5)
+
+[node name="Floor4" parent="FinishedMesh" instance=ExtResource("1_planks")]
+transform = Transform3D(17, 0, 0, 0, 17, 0, 0, 0, 17, 0, 0, 8.5)
+
+[node name="Floor5" parent="FinishedMesh" instance=ExtResource("1_planks")]
+transform = Transform3D(17, 0, 0, 0, 17, 0, 0, 0, 17, 17, 0, -8.5)
+
+[node name="Floor6" parent="FinishedMesh" instance=ExtResource("1_planks")]
+transform = Transform3D(17, 0, 0, 0, 17, 0, 0, 0, 17, 17, 0, 8.5)
+
+[node name="WallCorner" parent="FinishedMesh" instance=ExtResource("2_wall_corner")]
+transform = Transform3D(17, 0, 0, 0, 17, 0, 0, 0, 17, 17, 0, 8.5)
+
+[node name="WallCorner2" parent="FinishedMesh" instance=ExtResource("2_wall_corner")]
+transform = Transform3D(0, 0, -17, 0, 17, 0, 17, 0, 0, 17, 0, -8.5)
+
+[node name="WallCorner3" parent="FinishedMesh" instance=ExtResource("2_wall_corner")]
+transform = Transform3D(-17, 0, 0, 0, 17, 0, 0, 0, -17, -17, 0, -8.5)
+
+[node name="WallCorner4" parent="FinishedMesh" instance=ExtResource("2_wall_corner")]
+transform = Transform3D(0, 0, 17, 0, 17, 0, -17, 0, 0, -17, 0, 8.5)
+
+[node name="WallN" parent="FinishedMesh" instance=ExtResource("3_wall")]
+transform = Transform3D(0, 0, 17, 0, 17, 0, -17, 0, 0, 0, 0, 8.5)
+
+[node name="WallS" parent="FinishedMesh" instance=ExtResource("4_wall_door")]
+transform = Transform3D(0, 0, -17, 0, 17, 0, 17, 0, 0, 0, 0, -8.5)
+
+[node name="Roof" parent="FinishedMesh" instance=ExtResource("5_roof_high_gable")]
+transform = Transform3D(17, 0, 0, 0, 17, 0, 0, 0, 17, -17, 17, -8.5)
+
+[node name="Roof2" parent="FinishedMesh" instance=ExtResource("5_roof_high_gable")]
+transform = Transform3D(17, 0, 0, 0, 17, 0, 0, 0, 17, 0, 17, -8.5)
+
+[node name="Roof3" parent="FinishedMesh" instance=ExtResource("5_roof_high_gable")]
+transform = Transform3D(17, 0, 0, 0, 17, 0, 0, 0, 17, 17, 17, -8.5)
+
+[node name="RoofEndE" parent="FinishedMesh" instance=ExtResource("6_roof_high_gable_end")]
+transform = Transform3D(17, 0, 0, 0, 17, 0, 0, 0, 17, 17, 17, -8.5)
+
+[node name="RoofEndW" parent="FinishedMesh" instance=ExtResource("6_roof_high_gable_end")]
+transform = Transform3D(-17, 0, 0, 0, 17, 0, 0, 0, -17, -17, 17, -8.5)
+
+[node name="Roof4" parent="FinishedMesh" instance=ExtResource("5_roof_high_gable")]
+transform = Transform3D(17, 0, 0, 0, 17, 0, 0, 0, 17, -17, 17, 8.5)
+
+[node name="Roof5" parent="FinishedMesh" instance=ExtResource("5_roof_high_gable")]
+transform = Transform3D(17, 0, 0, 0, 17, 0, 0, 0, 17, 0, 17, 8.5)
+
+[node name="Roof6" parent="FinishedMesh" instance=ExtResource("5_roof_high_gable")]
+transform = Transform3D(17, 0, 0, 0, 17, 0, 0, 0, 17, 17, 17, 8.5)
+
+[node name="RoofEndE2" parent="FinishedMesh" instance=ExtResource("6_roof_high_gable_end")]
+transform = Transform3D(17, 0, 0, 0, 17, 0, 0, 0, 17, 17, 17, 8.5)
+
+[node name="RoofEndW2" parent="FinishedMesh" instance=ExtResource("6_roof_high_gable_end")]
+transform = Transform3D(-17, 0, 0, 0, 17, 0, 0, 0, -17, -17, 17, 8.5)
+
+[node name="Chimney" parent="FinishedMesh" instance=ExtResource("7_chimney")]
+transform = Transform3D(17, 0, 0, 0, 17, 0, 0, 0, 17, 17, 17, 8.5)
 
 [node name="ConstructionMesh" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 9, 0)
 visible = false
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 9, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 17.935, 0)
 shape = SubResource("Shape")
 
 [node name="SelectionRing" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0)
 visible = false
-mesh = SubResource("RingMesh")
+mesh = SubResource("SelectionRing_mesh")

@@ -1076,3 +1076,7 @@ func _get_or_create(node_name: String) -> Node3D:
 		n = Node3D.new(); n.name = node_name
 		scene.add_child.call_deferred(n)
 	return n
+
+# Exposes the proven land/ocean test so placement code can block the coast.
+func is_land_at(p: Vector2) -> bool:
+	return _is_land(p)
