@@ -27,6 +27,13 @@ const ADULT_TO_ELDER_AGE := 50
 const MAX_AGE := 75
 const ELDER_DEATH_CHANCE := 0.06
 
+## When a hand-ordered gatherer empties a tree (or rock), it auto-moves to the
+## nearest remaining node of the same resource within this range and keeps
+## working — so you right-click a forest ONCE instead of every tree. Beyond this
+## range it goes idle (so a lone worker won't trek across a huge map). 0 = no
+## limit. Tune to roughly "one forest's worth" in your world's scale.
+const GATHER_CONTINUE_RANGE := 1600.0
+
 @export var carry_capacity: int = 8
 @export var gather_interval: float = 1.2
 @export var build_rate: float = 12.0
@@ -178,20 +185,40 @@ func _try_autofind_job() -> bool:
 	if _autofind_construction():
 		return true
 
-	# Then resource producers.
+	# Then resource producers, in priority order. Within each resource tier,
+	# pick the NEAREST site that's on our team and has a free worker slot.
+	# Previously this claimed the first site in group-iteration order, which is
+	# effectively arbitrary and differs between the editor and an exported
+	# build — that's why citizens walked across the map to a far lumber camp.
 	var candidates = [
-		{"group": "farms",        "job": Job.FARMER,     "resource": "food"},
-		{"group": "lumber_camps", "job": Job.WOODCUTTER,  "resource": "wood"},
-		{"group": "quarries",     "job": Job.MINER,       "resource": "stone"},
-		{"group": "mines",        "job": Job.MINER,       "resource": "iron"},
+		{"group": "farms",        "job": Job.FARMER},
+		{"group": "lumber_camps", "job": Job.WOODCUTTER},
+		{"group": "quarries",     "job": Job.MINER},
+		{"group": "mines",        "job": Job.MINER},
 	]
 	for c in candidates:
+		var best = null
+		var best_dist := INF
 		for site in get_tree().get_nodes_in_group(c["group"]):
-			if is_instance_valid(site) and site.is_constructed \
-					and site.has_method("assign_worker") and site.assign_worker(self):
-				current_job = c["job"]
-				workplace   = site
-				return true
+			if not is_instance_valid(site) or not site.is_constructed:
+				continue
+			if "team" in site and site.team != team:
+				continue
+			if not site.has_method("assign_worker"):
+				continue
+			# Check there's room WITHOUT claiming the slot yet, so a closer but
+			# full site doesn't make us skip a slightly farther open one.
+			if site.has_method("worker_count") and "max_workers" in site \
+					and site.worker_count() >= site.max_workers:
+				continue
+			var d := global_position.distance_to(site.global_position)
+			if d < best_dist:
+				best_dist = d
+				best = site
+		if best != null and best.assign_worker(self):
+			current_job = c["job"]
+			workplace   = best
+			return true
 	return false
 
 
@@ -242,7 +269,13 @@ func _auto_work_job(delta: float) -> void:
 		carried_amount += got
 		carried_resource = resource_type
 	elif carried_amount == 0:
+		# Node exhausted, hands empty. If this is a hand-issued gather order,
+		# keep harvesting the local forest/field by hopping to the nearest
+		# remaining node of the same resource; only idle if none is in range.
+		var dead = workplace
 		_leave_workplace()
+		if _gather_continue_to_nearest(dead):
+			return
 		current_job = Job.NONE
 		return
 	else:
@@ -461,19 +494,61 @@ func _continue_delivery() -> void:
 			_try_autofind_job()
 		return
 
-	if has_player_order and order_kind == "gather" and is_instance_valid(order_target) and workplace == null:
+	if has_player_order and order_kind == "gather" and workplace == null:
 		var site = order_target
-		var job := _job_for_target(site)
-		if job == Job.NONE:
-			stop_special_orders()
+		# Resume the original node if it still has resource and a free slot...
+		if is_instance_valid(site) and ("amount" not in site or site.amount > 0) \
+				and site.has_method("assign_worker") and site.assign_worker(self):
+			workplace = site
+			current_job = _job_for_target(site)
+			_gather_timer = 0.0
 			return
-		if site.has_method("assign_worker") and not site.assign_worker(self):
-			GameManager.notify("That workplace is already full.")
-			stop_special_orders()
+		# ...otherwise keep harvesting: hop to the nearest equivalent node.
+		if _gather_continue_to_nearest(site):
 			return
-		workplace = site
-		current_job = job
+		stop_special_orders()
+
+
+## Hop a hand-ordered gatherer to the nearest remaining node of the same
+## resource as `prev` (the just-emptied one), claim it, and resume working.
+## Returns false if nothing suitable is in range, letting the caller go idle.
+## Only acts on active gather orders, so the autonomous economy is unaffected.
+func _gather_continue_to_nearest(prev) -> bool:
+	if not (has_player_order and order_kind == "gather"):
+		return false
+
+	var want_type := ""
+	if is_instance_valid(prev) and "resource_type" in prev:
+		want_type = prev.resource_type
+
+	# Collect candidate nodes (trees, rocks, ...) of the same type that still
+	# have resource left and are within roaming range, sorted nearest-first.
+	var cands: Array = []
+	for n in get_tree().get_nodes_in_group("resources"):
+		if not is_instance_valid(n) or n == prev:
+			continue
+		if want_type != "" and ("resource_type" in n) and n.resource_type != want_type:
+			continue
+		if "amount" in n and n.amount <= 0:
+			continue
+		var d: float = global_position.distance_to(n.global_position)
+		if GATHER_CONTINUE_RANGE > 0.0 and d > GATHER_CONTINUE_RANGE:
+			continue
+		cands.append({"n": n, "d": d})
+
+	cands.sort_custom(func(a, b): return a["d"] < b["d"])
+
+	# Claim the nearest that actually accepts us (skip any that are full).
+	for c in cands:
+		var n = c["n"]
+		if n.has_method("assign_worker") and not n.assign_worker(self):
+			continue
+		workplace = n
+		order_target = n
+		current_job = _job_for_target(n)
 		_gather_timer = 0.0
+		return true
+	return false
 
 
 func _nearest_in_group(group_name: String):

@@ -15,11 +15,19 @@ bottom_radius = 18.0
 height = 50.0
 material = SubResource("TMat")
 
+; collision_layer = 2 (not 1): the navmesh bakes only layer-1 colliders
+; (mountains / rivers / buildings / NavFloor), so trees on layer 2 are NOT
+; punched out of the walkable mesh — units no longer route around whole
+; forests. collision_mask = 0 means units pass through trunks freely.
+; The pick raycast in camera_controller.gd queries all layers (it sets no
+; collision_mask), so trees stay clickable and right-click-gatherable.
 [node name="ResourceNode" type="StaticBody3D" groups=["resources", "wood_sources"]]
 script = ExtResource("1_s")
 resource_type = "wood"
 amount = 120
 resource_group = "wood_sources"
+collision_layer = 2
+collision_mask = 0
 
 [node name="Mesh" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 25, 0)
@@ -28,4 +36,3 @@ mesh = SubResource("Trunk")
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 25, 0)
 shape = SubResource("Cyl")
-

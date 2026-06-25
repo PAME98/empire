@@ -4,7 +4,15 @@ extends Node3D
 ## with explicit per-command RPC calls. Godot 4 requires calling .rpc_id()
 ## directly on the method reference, not on a bound Callable.
 
-@export var pan_speed:      float = 600.0
+@export var pan_speed: float = 600.0
+## Map-size scaling. On a large map the authored pan_speed/boom_max are far too
+## small to traverse or survey the world, and the rig starts in the corner.
+## These are applied in _ready() relative to the map's longest side.
+## pan_speed becomes at least longest * PAN_SPEED_PER_UNIT (so a full-tilt pan
+## crosses the map in a sane number of seconds); boom_max (max zoom-out) becomes
+## at least longest * BOOM_MAX_PER_UNIT so you can see a large slice at once.
+@export var PAN_SPEED_PER_UNIT: float = 0.06
+@export var BOOM_MAX_PER_UNIT: float = 0.40
 @export var rotate_speed:   float = 1.6
 @export var zoom_step:      float = 0.08
 @export var boom_min:       float = 350.0
@@ -74,6 +82,19 @@ func _ready() -> void:
 	GameManager.attack_targeting_mode_changed.connect(_on_attack_targeting_mode_changed)
 	_build_placement_grid()
 	_map_size = MapSettings.map_size
+	var longest := maxf(_map_size.x, _map_size.y)
+	# Start over the centre of the map instead of the (0,0) corner, so the
+	# player isn't stranded in empty ocean on a large map.
+	position = Vector3(_map_size.x * 0.5, 0.0, _map_size.y * 0.5)
+	# Scale traversal + zoom-out so a big world is navigable and surveyable.
+	# maxf keeps any larger authored value.
+	pan_speed = maxf(pan_speed, longest * PAN_SPEED_PER_UNIT)
+	boom_max  = maxf(boom_max, longest * BOOM_MAX_PER_UNIT)
+	# Far clip must reach past the zoomed-out boom or distant terrain vanishes.
+	if cam:
+		cam.far = maxf(cam.far, boom_max * 3.0)
+	_apply_zoom()
+	_clamp_to_bounds()
 	_apply_zoom()
 
 

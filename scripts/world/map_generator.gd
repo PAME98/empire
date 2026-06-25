@@ -38,14 +38,37 @@ const MOUNTAIN_SCENE       := "res://scenes/world/mountain.tscn"
 # ---------------------------------------------------------------------------
 # Continents / ocean
 # ---------------------------------------------------------------------------
-## Noise frequency in world units. SMALLER => larger, fewer continents.
-const CONTINENT_NOISE_FREQ   := 0.00035
-const CONTINENT_OCTAVES      := 4
+## CONTINENT SIZE IS RELATIVE TO MAP SIZE.
+## The continent noise frequency is computed in _configure_noises() as
+## CONTINENT_SPAN / (longest map side) — NOT a fixed number. That's the fix for
+## "continents look tiny on a big map": a fixed frequency makes landmasses a
+## fixed number of world-units across, so on a large map they shrink to specks.
+## Tying it to map size keeps roughly the same number of continents across the
+## map no matter how big the map is.
+##
+## CONTINENT_SPAN ~= how many big landmasses span the map's longer side.
+## SMALLER => fewer, bigger continents. 3.0 gives a handful of large continents.
+const CONTINENT_SPAN         := 3.0
+const CONTINENT_OCTAVES      := 5
+## A second, higher-frequency noise layer sprinkles standalone islands into the
+## open ocean BETWEEN continents, so you get large continents + medium + small
+## islands rather than only coastline crumbs. ISLAND_SPAN uses the same
+## "features across the map" idea but higher => many smaller islands. Raise
+## ISLAND_THRESHOLD for fewer/rarer islands; raise ISLAND_RAISE to make them
+## bigger. (Islands are separated by ocean, so land units can't walk to them —
+## they're map variety / future-boat fodder.)
+const ISLAND_SPAN            := 10.0
+const ISLAND_OCTAVES         := 3
+const ISLAND_THRESHOLD       := 0.62
+const ISLAND_RAISE           := 0.08
 ## Land where land_value > SEA_LEVEL. Raise => more ocean / smaller land.
-const SEA_LEVEL              := 0.46
-## Radial edge falloff: where ocean starts to win, and how hard it pushes the
-## borders under water. Keeps a clean coast ring around the playable area.
-const EDGE_FALLOFF_START     := 0.55
+## 0.47 keeps continents large while leaving open sea for islands to sit in.
+const SEA_LEVEL              := 0.47
+## Radial edge falloff: where ocean starts to win near the borders. START is the
+## fraction of the half-map that stays falloff-free (higher => land reaches
+## closer to the edge); STRENGTH guarantees an ocean rim so land never runs
+## flush into the map border.
+const EDGE_FALLOFF_START     := 0.60
 const EDGE_FALLOFF_STRENGTH  := 1.15
 ## Ground fragments below SEA_LEVEL - COAST_FEATHER are discarded (ocean shows);
 ## the sand beach band spans SEA_LEVEL .. SEA_LEVEL + BEACH_BAND. River mouths
@@ -72,11 +95,25 @@ const LAND_MASK_MAX_DIM      := 720
 # ---------------------------------------------------------------------------
 # Forests
 # ---------------------------------------------------------------------------
-const FOREST_CLUSTERS_PER_MPX := 12.0
-const TREES_PER_CLUSTER_MIN   := 5
-const TREES_PER_CLUSTER_MAX   := 14
+const FOREST_CLUSTERS_PER_MPX := 14.0
+const TREES_PER_CLUSTER_MIN   := 8
+const TREES_PER_CLUSTER_MAX   := 22
 const FOREST_SPREAD           := 90.0
 const TREE_RADIUS             := 18.0
+## Trees no longer carve the navmesh (tree.tscn is on collision layer 2 now),
+## so a wood can pack tightly. This is centre-to-centre spacing WITHIN a wood —
+## smaller => denser thicket. 34 leaves trunks (r=18) slightly overlapping for a
+## lush look; raise toward 40+ for clearly separated trees.
+const TREE_INTRA_SPACING      := 34.0
+## Forest regions: a low-frequency gate (same idea as MOUNTAIN_REGION_* and
+## RIVER_REGION_*) so woods concentrate into wooded areas instead of scattering
+## across the whole map. Higher threshold => rarer, more concentrated forests.
+const FOREST_REGION_FREQ      := 0.0011
+const FOREST_REGION_THRESHOLD := 0.48
+## Bounded retries: how many times to look for a cluster centre inside a forest
+## region, and how many times to place each individual tree, before giving up.
+const FOREST_CENTRE_TRIES     := 10
+const TREE_PLACE_TRIES        := 6
 
 # ---------------------------------------------------------------------------
 # Navigation
@@ -146,8 +183,10 @@ const CITIZEN_COUNT        := 5
 # ---------------------------------------------------------------------------
 var _rng                   := RandomNumberGenerator.new()
 var _continent_noise       := FastNoiseLite.new()
+var _island_noise          := FastNoiseLite.new()
 var _mountain_region_noise := FastNoiseLite.new()
 var _river_region_noise    := FastNoiseLite.new()
+var _forest_region_noise   := FastNoiseLite.new()
 var _land_mask_tex         : ImageTexture
 var _map_rect              : Rect2
 var _center                : Vector2
@@ -192,11 +231,21 @@ func _ready() -> void:
 
 
 func _configure_noises() -> void:
+	# Longest map side drives the map-relative feature frequencies below, so
+	# continents and islands keep the same proportions at any map size.
+	var longest := maxf(_map_rect.size.x, _map_rect.size.y)
+
 	_continent_noise.seed = _rng.randi()
 	_continent_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
-	_continent_noise.frequency = CONTINENT_NOISE_FREQ
+	_continent_noise.frequency = CONTINENT_SPAN / longest
 	_continent_noise.fractal_type = FastNoiseLite.FRACTAL_FBM
 	_continent_noise.fractal_octaves = CONTINENT_OCTAVES
+
+	_island_noise.seed = _rng.randi()
+	_island_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	_island_noise.frequency = ISLAND_SPAN / longest
+	_island_noise.fractal_type = FastNoiseLite.FRACTAL_FBM
+	_island_noise.fractal_octaves = ISLAND_OCTAVES
 
 	_mountain_region_noise.seed = _rng.randi()
 	_mountain_region_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
@@ -206,13 +255,24 @@ func _configure_noises() -> void:
 	_river_region_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 	_river_region_noise.frequency = RIVER_REGION_FREQ
 
+	_forest_region_noise.seed = _rng.randi()
+	_forest_region_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	_forest_region_noise.frequency = FOREST_REGION_FREQ
+
 
 # ---------------------------------------------------------------------------
 # Land mask + feature regions
 # ---------------------------------------------------------------------------
 func _land_value(pos: Vector2) -> float:
-	var n := _continent_noise.get_noise_2d(pos.x, pos.y) * 0.5 + 0.5
-	return n - _edge_falloff(pos)
+	# Continents: broad, smooth landmasses from the low-frequency base noise.
+	var base := _continent_noise.get_noise_2d(pos.x, pos.y) * 0.5 + 0.5
+	# Islands: where the higher-frequency island noise clears its threshold it
+	# raises a small patch just above sea level — a standalone island. max()
+	# means islands only ADD land in open ocean; they never carve into a
+	# continent (where base already wins), and they fade to nothing elsewhere.
+	var isl := _island_noise.get_noise_2d(pos.x, pos.y) * 0.5 + 0.5
+	var island_field := smoothstep(ISLAND_THRESHOLD, 1.0, isl) * (SEA_LEVEL + ISLAND_RAISE)
+	return maxf(base, island_field) - _edge_falloff(pos)
 
 
 func _edge_falloff(pos: Vector2) -> float:
@@ -845,26 +905,62 @@ func _generate_forests() -> void:
 	var clusters : int = max(int(round(area_mpx * FOREST_CLUSTERS_PER_MPX)), 2)
 
 	for _c in clusters:
-		var centre_v = _random_land_point(SEA_LEVEL + 0.02)
-		if centre_v == null:
+		# Pick a cluster centre that sits inside a forest region. Bounded
+		# retries so a map with few wooded regions can't spin here forever.
+		var centre := Vector2.ZERO
+		var have_centre := false
+		for _t in FOREST_CENTRE_TRIES:
+			var cv = _random_land_point(SEA_LEVEL + 0.02)
+			if cv == null:
+				continue
+			if _in_forest_region(cv):
+				centre = cv
+				have_centre = true
+				break
+		if not have_centre:
 			continue
-		var centre: Vector2 = centre_v
-		var count  := _rng.randi_range(TREES_PER_CLUSTER_MIN, TREES_PER_CLUSTER_MAX)
-		for _n in count:
-			var pos := centre + Vector2(
-				_rng.randf_range(-FOREST_SPREAD, FOREST_SPREAD),
-				_rng.randf_range(-FOREST_SPREAD, FOREST_SPREAD)
-			)
-			if not _map_rect.has_point(pos): continue
-			if not _is_land(pos):                    continue
-			if _overlaps_river(pos, TREE_RADIUS):    continue
-			if _overlaps_mountain(pos, TREE_RADIUS): continue
-			if _overlaps_tree(pos, TREE_RADIUS):     continue
 
-			var node: Node3D = scene_pack.instantiate()
-			resources.add_child(node)
-			node.global_position = _to3(pos)
-			_tree_points.append(pos)
+		var count := _rng.randi_range(TREES_PER_CLUSTER_MIN, TREES_PER_CLUSTER_MAX)
+		for _n in count:
+			# Radial falloff (Gaussian radius) concentrates trees near the
+			# centre, so woods read as cohesive clumps and stragglers are rare.
+			# Retry a few times so one blocked roll doesn't silently drop a tree.
+			for _try in TREE_PLACE_TRIES:
+				var ang := _rng.randf() * TAU
+				var rad : float = absf(_rng.randfn(0.0, FOREST_SPREAD * 0.45))
+				var pos := centre + Vector2(cos(ang), sin(ang)) * rad
+				if not _map_rect.has_point(pos):             continue
+				if not _is_land(pos):                        continue
+				if _overlaps_river(pos, TREE_RADIUS):        continue
+				if _overlaps_mountain(pos, TREE_RADIUS):     continue
+				# Tight intra-wood packing: a raw distance check, NOT the
+				# obstacle-clearance _overlaps_tree() (that one adds
+				# MIN_OBSTACLE_GAP, the wide spacing that used to make woods
+				# sparse). Trees are off the navmesh now, so dense is fine.
+				if _tree_too_close(pos, TREE_INTRA_SPACING): continue
+
+				var node: Node3D = scene_pack.instantiate()
+				resources.add_child(node)
+				node.global_position = _to3(pos)
+				_tree_points.append(pos)
+				break
+
+
+## True where the forest-region noise clears the threshold — gates where
+## clusters may spawn, mirroring the mountain/river region gates.
+func _in_forest_region(pos: Vector2) -> bool:
+	return _forest_region_noise.get_noise_2d(pos.x, pos.y) * 0.5 + 0.5 > FOREST_REGION_THRESHOLD
+
+
+## Raw centre-to-centre proximity test against already-placed trees, for
+## packing trees inside a wood. Distinct from _overlaps_tree(), which bakes in
+## MIN_OBSTACLE_GAP (the wide spacing meant for navmesh-blocking obstacles).
+func _tree_too_close(pos: Vector2, min_dist: float) -> bool:
+	var min_sq := min_dist * min_dist
+	for p in _tree_points:
+		if pos.distance_squared_to(p) < min_sq:
+			return true
+	return false
 
 
 # ---------------------------------------------------------------------------
@@ -1057,7 +1153,12 @@ func _bake_navigation() -> void:
 	nm.agent_radius    = NAV_AGENT_RADIUS
 	nm.agent_height    = 30.0
 	nm.agent_max_climb = 4.0
-	nm.cell_size       = 4.0
+	# Scale navmesh resolution with map size so the bake stays fast on big maps.
+	# A fixed 4.0 cell on a 6000-wide map = 1500x1500 = 2.25M cells and a slow
+	# bake; this keeps the grid near ~1000 cells across at any size. Smaller
+	# cells = finer paths but slower bake. Clamped so small maps stay crisp and
+	# huge maps don't get absurdly coarse.
+	nm.cell_size       = clampf(maxf(_map_rect.size.x, _map_rect.size.y) / 1000.0, 4.0, 16.0)
 	nm.cell_height     = 4.0
 	nm.filter_baking_aabb = AABB(
 		Vector3(_map_rect.position.x, -50.0, _map_rect.position.y),
