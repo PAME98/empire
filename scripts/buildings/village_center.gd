@@ -50,14 +50,17 @@ func _process(delta: float) -> void:
 
 
 func queue_citizen() -> bool:
-	var cost = {"food": 40, "water": 8}
-	if GameManager.population >= GameManager.housing_capacity:
-		GameManager.notify("Need more housing before recruiting.")
+	var cost := {"food": 40, "water": 8}
+	# Runs on the HOST for whichever team owns this building, so it must use
+	# THAT team's pool — not _my_team(), which is always the host's team.
+	var pop: Dictionary = GameManager.team_population.get(team, {})
+	if pop.get("population", 0) >= pop.get("housing_capacity", 0):
+		GameManager.notify_team(team, "Need more housing before recruiting.")
 		return false
-	if not GameManager.can_afford(cost):
-		GameManager.notify("Not enough food or water to recruit a citizen.")
+	if not GameManager.can_afford_for_team(cost, team):
+		GameManager.notify_team(team, "Not enough food or water to recruit a citizen.")
 		return false
-	GameManager.spend(cost)
+	GameManager.spend_for_team(cost, team)
 	recruit_queue.append({"type": "citizen", "duration": recruit_time})
 	if not is_recruiting:
 		_start_next_recruit()

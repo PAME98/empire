@@ -528,3 +528,16 @@ func clear_trees_at(world_pos: Vector3, radius: float = 44.0) -> void:
 
 func notify(text: String) -> void:
 	notification.emit(text)
+	
+
+## Route a notification to the player who owns `team`. The host runs building
+## queue logic for EVERY team, so a "can't afford / no housing" message must go
+## to the owning client — not pop up on the host's screen. Host-owned team and
+## single-player resolve to peer 1 and show locally.
+func notify_team(team_id: int, text: String) -> void:
+	var nm := get_node_or_null("/root/NetworkManager")
+	var peer_id: int = nm.peer_for_team(team_id) if nm else 1
+	if peer_id <= 1:
+		notify(text)
+	else:
+		_nc()._notify_peer.rpc_id(peer_id, text)

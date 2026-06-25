@@ -39,6 +39,28 @@ func _nm():
 	return _network_manager
 
 
+# ---------------------------------------------------------------------------
+# AUTHORITY HELPERS
+# ---------------------------------------------------------------------------
+## True where this peer may run authoritative/simulation logic: single-player
+## (no multiplayer peer at all) OR the host in a networked game. This MUST be
+## used by every player-action handler and spawn helper instead of the raw
+## multiplayer.is_server() — because is_server() returns FALSE in a peerless
+## single-player session, which is what silently no-opped every spawn and
+## command in solo play (no citizens, no founding, no building, no orders).
+## Mirrors GameManager.is_sim_authority() exactly so both layers agree.
+func _is_authority() -> bool:
+	return not multiplayer.has_multiplayer_peer() or multiplayer.is_server()
+
+## True only when a real network session exists. Outbound .rpc()/.rpc_id()
+## replication MUST be guarded by this — calling an RPC with no multiplayer
+## peer errors out ("Can't make RPCs without a multiplayer peer") and, for
+## call_local methods, won't even run the local body. In single-player there
+## are no clients to mirror to, so we simply skip the replication.
+func _networked() -> bool:
+	return multiplayer.has_multiplayer_peer()
+
+
 ## Resolve the team of whoever issued the current command.
 ## When a CLIENT calls request_*.rpc_id(1, ...), get_remote_sender_id() is that
 ## client's peer id. When the HOST issues its OWN orders we call request_*()
@@ -46,6 +68,15 @@ func _nm():
 ## get_remote_sender_id() returns 0 — so fall back to the host's own unique id.
 ## Every request_* handler uses this instead of reading the sender id raw.
 func _caller_team() -> int:
+	# Single-player launched straight from the map-size menu never calls
+	# host_game(), so NetworkManager.players is empty and team_for_peer() would
+	# return -1 here — which then fails every "unit.team != sender_team" check
+	# and every can_afford_for_team(cost, -1) lookup, silently breaking all
+	# commands/building/recruiting. With no peer there is exactly one local
+	# team, so resolve to it directly. (my_team() defaults to 0 when the
+	# registry is empty, matching GameManager._my_team() and _init_team(0).)
+	if not multiplayer.has_multiplayer_peer():
+		return _nm().my_team()
 	var sender := multiplayer.get_remote_sender_id()
 	if sender == 0:
 		sender = multiplayer.get_unique_id()
@@ -118,7 +149,7 @@ func _resolve_building(ref) -> Node:
 # ---------------------------------------------------------------------------
 @rpc("any_peer", "reliable")
 func request_move(unit_ids: Array, pos: Vector3) -> void:
-	if not multiplayer.is_server():
+	if not _is_authority():
 		return
 	var sender_team: int = _caller_team()
 	for uid in unit_ids:
@@ -130,7 +161,7 @@ func request_move(unit_ids: Array, pos: Vector3) -> void:
 
 @rpc("any_peer", "reliable")
 func request_attack(unit_ids: Array, target_path: NodePath) -> void:
-	if not multiplayer.is_server():
+	if not _is_authority():
 		return
 	var sender_team: int = _caller_team()
 	var target := get_node_or_null(target_path)
@@ -145,7 +176,7 @@ func request_attack(unit_ids: Array, target_path: NodePath) -> void:
 
 @rpc("any_peer", "reliable")
 func request_attack_position(unit_ids: Array, pos: Vector3) -> void:
-	if not multiplayer.is_server():
+	if not _is_authority():
 		return
 	var sender_team: int = _caller_team()
 	for uid in unit_ids:
@@ -157,7 +188,7 @@ func request_attack_position(unit_ids: Array, pos: Vector3) -> void:
 
 @rpc("any_peer", "reliable")
 func request_gather(unit_ids: Array, target_path: NodePath) -> void:
-	if not multiplayer.is_server():
+	if not _is_authority():
 		return
 	var sender_team: int = _caller_team()
 	var target := get_node_or_null(target_path)
@@ -172,7 +203,7 @@ func request_gather(unit_ids: Array, target_path: NodePath) -> void:
 
 @rpc("any_peer", "reliable")
 func request_build_on(unit_ids: Array, site_ref) -> void:
-	if not multiplayer.is_server():
+	if not _is_authority():
 		return
 	var sender_team: int = _caller_team()
 	var site := _resolve_building(site_ref)
@@ -207,7 +238,7 @@ func _all_building_ids() -> Array:
 # ---------------------------------------------------------------------------
 @rpc("any_peer", "reliable")
 func request_place_building(building_id: String, pos: Vector3) -> void:
-	if not multiplayer.is_server():
+	if not _is_authority():
 		return
 	var sender_team: int = _caller_team()
 
@@ -230,7 +261,12 @@ func request_place_building(building_id: String, pos: Vector3) -> void:
 
 	_gm().spend_for_team(cost, sender_team)
 	var net_id := _alloc_building_id()
-	_spawn_building_on_all.rpc(building_id, pos, sender_team, net_id)
+	# Networked: broadcast (call_local runs it on the host too). Single-player:
+	# there's no peer, so call_local would never execute — invoke it directly.
+	if _networked():
+		_spawn_building_on_all.rpc(building_id, pos, sender_team, net_id)
+	else:
+		_spawn_building_on_all(building_id, pos, sender_team, net_id)
 
 
 @rpc("authority", "call_local", "reliable")
@@ -244,7 +280,9 @@ func _spawn_building_on_all(building_id: String, pos: Vector3, team: int, net_id
 	var scene := get_tree().current_scene
 	scene.get_node("Buildings").add_child(building)
 	building.global_position = pos
-	if multiplayer.is_server():
+	# Rebake on the authority only (host in MP, this peer in single-player).
+	# Clients receiving the call_local broadcast must NOT rebake.
+	if _is_authority():
 		var map_gen := scene.get_node_or_null("MapGenerator")
 		if map_gen and map_gen.has_method("rebake_navigation"):
 			map_gen.rebake_navigation()
@@ -255,10 +293,12 @@ func _spawn_building_on_all(building_id: String, pos: Vector3, team: int, net_id
 # client only ever ASKS; the host validates the spot and is the one peer
 # that actually instantiates the Village Center + initial citizens, which
 # then reach every client through the normal building/unit spawn replication.
+# (In single-player StartPlacement calls _execute_found_town directly and
+# never goes through this RPC, but the gate is kept consistent anyway.)
 # ---------------------------------------------------------------------------
 @rpc("any_peer", "reliable")
 func request_found_town(pos: Vector3, team: int) -> void:
-	if not multiplayer.is_server():
+	if not _is_authority():
 		return
 	var sender_team: int = _caller_team()
 	# Trust the caller's team derivation from the player registry, not the
@@ -280,7 +320,7 @@ func request_found_town(pos: Vector3, team: int) -> void:
 # ---------------------------------------------------------------------------
 @rpc("any_peer", "reliable")
 func request_train_unit(building_ref, unit_type: String) -> void:
-	if not multiplayer.is_server():
+	if not _is_authority():
 		return
 	var sender_team: int = _caller_team()
 	var building := _resolve_building(building_ref)
@@ -300,7 +340,7 @@ func request_train_unit(building_ref, unit_type: String) -> void:
 # ---------------------------------------------------------------------------
 @rpc("any_peer", "reliable")
 func request_demolish(building_ref) -> void:
-	if not multiplayer.is_server():
+	if not _is_authority():
 		return
 	var sender_team: int = _caller_team()
 	var building := _resolve_building(building_ref)
@@ -314,7 +354,7 @@ func request_demolish(building_ref) -> void:
 # ---------------------------------------------------------------------------
 @rpc("any_peer", "reliable")
 func request_return_to_work(unit_ids: Array) -> void:
-	if not multiplayer.is_server():
+	if not _is_authority():
 		return
 	var sender_team: int = _caller_team()
 	for uid in unit_ids:
@@ -341,7 +381,7 @@ func _notify_peer(text: String) -> void:
 ## this so the spawn happens exactly once and is mirrored consistently.
 # ---------------------------------------------------------------------------
 func server_spawn_unit(scene_path: String, pos: Vector3, team: int) -> Node3D:
-	if not multiplayer.is_server():
+	if not _is_authority():
 		return null
 	var uid  := _alloc_unit_id()
 	var unit: Node3D = load(scene_path).instantiate()
@@ -349,8 +389,9 @@ func server_spawn_unit(scene_path: String, pos: Vector3, team: int) -> Node3D:
 	unit.team = team
 	get_tree().current_scene.get_node("Units").add_child(unit)
 	unit.global_position = pos
-	# Tell all clients to mirror this spawn
-	_replicate_unit_spawn.rpc(scene_path, pos, team, uid)
+	# Tell all clients to mirror this spawn (no-op / skipped in single-player).
+	if _networked():
+		_replicate_unit_spawn.rpc(scene_path, pos, team, uid)
 	return unit
 
 
@@ -376,11 +417,12 @@ func _replicate_unit_spawn(scene_path: String, pos: Vector3, team: int, uid: int
 ## so the death is mirrored: on the host it frees the unit locally and tells
 ## every client to free their copy by unit_id. Without this, the host's unit
 ## vanishes but the client keeps showing a "corpse" that never dies.
+## (The local queue_free() happens in unit.die(); this only replicates.)
 func server_kill_unit(unit: Node, cause: String = "") -> void:
-	if not multiplayer.is_server():
+	if not _is_authority():
 		return
 	var uid: int = unit.get_meta("unit_id", -1) if unit else -1
-	if uid != -1:
+	if uid != -1 and _networked():
 		_replicate_unit_death.rpc(uid)
 
 
@@ -398,7 +440,7 @@ func _replicate_unit_death(uid: int) -> void:
 ## — notably the Village Center created at town founding. Host-authoritative,
 ## same contract as server_spawn_unit: call only from authoritative code.
 func server_spawn_building(scene_path: String, pos: Vector3, team: int) -> Node3D:
-	if not multiplayer.is_server():
+	if not _is_authority():
 		return null
 	var net_id := _alloc_building_id()
 	var building: Node3D = load(scene_path).instantiate()
@@ -406,7 +448,8 @@ func server_spawn_building(scene_path: String, pos: Vector3, team: int) -> Node3
 	building.set_meta("building_net_id", net_id)
 	get_tree().current_scene.get_node("Buildings").add_child(building)
 	building.global_position = pos
-	_replicate_building_spawn.rpc(scene_path, pos, team, net_id)
+	if _networked():
+		_replicate_building_spawn.rpc(scene_path, pos, team, net_id)
 	return building
 
 
@@ -473,10 +516,17 @@ var _logged_sync_once := false
 ## likely to have changed in bulk — GameManager._yearly_tick() does, for
 ## aging — and optionally from UnitSyncTicker at a slower cadence if you
 ## want job/cargo changes to show up sooner than once a year.
+##
+## NOTE: this is a pure host->client PUSH. It stays gated on raw
+## multiplayer.is_server() so it cleanly no-ops in single-player (no peers to
+## push to, and calling .rpc() with no peer would error). Single-player UI is
+## driven directly by GameManager.update_ui(), so nothing is lost here.
 # ---------------------------------------------------------------------------
 func server_sync_citizen_states() -> void:
 	if not multiplayer.is_server():
 		return
+	if multiplayer.get_peers().is_empty():
+		return   # no clients to push to (e.g. single-player host)
 	var data: Array = []
 	for c in _gm().all_citizens:
 		if not is_instance_valid(c):
@@ -523,6 +573,9 @@ func _receive_citizen_states(data: Array) -> void:
 ## (typically showing 0%, since the client never locally calls
 ## queue_soldier()/queue_citizen() either — those are host-only, invoked via
 ## request_train_unit).
+##
+## Like the citizen-state push above, these are pure host->client PUSHes and
+## stay gated on raw multiplayer.is_server() so they no-op in single-player.
 # ---------------------------------------------------------------------------
 func _building_extra_state(b: Node) -> Dictionary:
 	if b is Barracks:
@@ -557,6 +610,8 @@ func _apply_extra_state(b: Node, extra: Dictionary) -> void:
 func server_sync_all_building_states() -> void:
 	if not multiplayer.is_server():
 		return
+	if multiplayer.get_peers().is_empty():
+		return   # no clients to push to (e.g. single-player host)
 	var data: Array = []
 	for b in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(b):
@@ -581,6 +636,8 @@ func server_sync_all_building_states() -> void:
 func server_sync_building_state(net_id: int) -> void:
 	if not multiplayer.is_server():
 		return
+	if multiplayer.get_peers().is_empty():
+		return   # no clients to push to (e.g. single-player host)
 	var b := _find_building(net_id)
 	if b == null:
 		return
@@ -608,6 +665,10 @@ func _receive_building_states(data: Array) -> void:
 
 # ---------------------------------------------------------------------------
 # RESOURCE SYNC  (host -> owning client only)
+## Pure host->client push. In single-player peer_for_team() returns -1 (no
+## registered players), so this returns early — single-player resource UI is
+## driven by GameManager.update_ui() instead. Left on raw is_server() so it
+## never attempts an .rpc() with no peer.
 # ---------------------------------------------------------------------------
 func server_sync_resources(team: int) -> void:
 	if not multiplayer.is_server():

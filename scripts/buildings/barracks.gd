@@ -58,10 +58,10 @@ func queue_soldier() -> bool:
 	if not is_constructed:
 		return false
 	var cost = GameManager.COSTS.get("soldier", {})
-	if not GameManager.can_afford(cost):
-		GameManager.notify("Not enough resources to train a soldier.")
+	if not GameManager.can_afford_for_team(cost, team):
+		GameManager.notify_team(team, "Not enough resources to train a soldier.")
 		return false
-	GameManager.spend(cost)
+	GameManager.spend_for_team(cost, team)
 	train_queue.append("soldier")
 	if not is_training:
 		_start_next()
@@ -72,10 +72,10 @@ func queue_artillery() -> bool:
 	if not is_constructed:
 		return false
 	var cost = GameManager.COSTS.get("artillery", {})
-	if not GameManager.can_afford(cost):
-		GameManager.notify("Not enough resources to train artillery.")
+	if not GameManager.can_afford_for_team(cost, team):
+		GameManager.notify_team(team, "Not enough resources to train artillery.")
 		return false
-	GameManager.spend(cost)
+	GameManager.spend_for_team(cost, team)
 	train_queue.append("artillery")
 	if not is_training:
 		_start_next()

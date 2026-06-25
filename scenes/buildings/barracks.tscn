@@ -1,12 +1,12 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene format=3 uid="uid://bx3ek5hd5tuij"]
 
-[ext_resource type="Script" path="res://scripts/buildings/barracks.gd" id="1_s"]
-[ext_resource type="PackedScene" path="res://assets/kenney/models/planks.glb" id="1_planks"]
-[ext_resource type="PackedScene" path="res://assets/kenney/models/wall-corner.glb" id="2_wall_corner"]
-[ext_resource type="PackedScene" path="res://assets/kenney/models/wall.glb" id="3_wall"]
-[ext_resource type="PackedScene" path="res://assets/kenney/models/wall-window-glass.glb" id="4_wall_window_glass"]
-[ext_resource type="PackedScene" path="res://assets/kenney/models/wall-door.glb" id="5_wall_door"]
-[ext_resource type="PackedScene" path="res://assets/kenney/models/roof-flat.glb" id="6_roof_flat"]
+[ext_resource type="PackedScene" uid="uid://cgfrp5m6iffnt" path="res://assets/kenney/models/planks.glb" id="1_planks"]
+[ext_resource type="Script" uid="uid://c7u7c5sqdv52g" path="res://scripts/buildings/barracks.gd" id="1_s"]
+[ext_resource type="PackedScene" uid="uid://btyemndgr60hd" path="res://assets/kenney/models/wall-corner.glb" id="2_wall_corner"]
+[ext_resource type="PackedScene" uid="uid://8areekjwesb0" path="res://assets/kenney/models/wall.glb" id="3_wall"]
+[ext_resource type="PackedScene" uid="uid://mw80tt77tfyh" path="res://assets/kenney/models/wall-window-glass.glb" id="4_wall_window_glass"]
+[ext_resource type="PackedScene" uid="uid://b7yrqcgvxpads" path="res://assets/kenney/models/wall-door.glb" id="5_wall_door"]
+[ext_resource type="PackedScene" uid="uid://cj1eaj42jidqx" path="res://assets/kenney/models/roof-flat.glb" id="6_roof_flat"]
 
 [sub_resource type="BoxShape3D" id="Shape"]
 size = Vector3(75, 16.89, 75)
@@ -17,224 +17,223 @@ shading_mode = 0
 albedo_color = Color(0, 1, 0, 0.5)
 
 [sub_resource type="CylinderMesh" id="SelectionRing_mesh"]
+material = SubResource("SelectionRing_mat")
 top_radius = 46.5
 bottom_radius = 46.5
 height = 0.5
-material = SubResource("SelectionRing_mat")
 
-[node name="Barracks" type="StaticBody3D" groups=["barracks", "buildings"]]
+[node name="Barracks" type="StaticBody3D" unique_id=814891029 groups=["barracks", "buildings"]]
 script = ExtResource("1_s")
-build_time = 10
 max_health = 600
 
-[node name="FinishedMesh" type="Node3D" parent="."]
+[node name="FinishedMesh" type="Node3D" parent="." unique_id=998699974]
 
-[node name="Floor" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor" parent="FinishedMesh" unique_id=1915459886 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, -30, 0, -30)
 
-[node name="Floor2" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor2" parent="FinishedMesh" unique_id=1800651401 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, -30, 0, -15)
 
-[node name="Floor3" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor3" parent="FinishedMesh" unique_id=132027914 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, -30, 0, 0)
 
-[node name="Floor4" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor4" parent="FinishedMesh" unique_id=1005227530 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, -30, 0, 15)
 
-[node name="Floor5" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor5" parent="FinishedMesh" unique_id=642110063 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, -30, 0, 30)
 
-[node name="Floor6" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor6" parent="FinishedMesh" unique_id=370158998 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, -15, 0, -30)
 
-[node name="Floor7" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor7" parent="FinishedMesh" unique_id=1114518949 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, -15, 0, -15)
 
-[node name="Floor8" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor8" parent="FinishedMesh" unique_id=439878776 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, -15, 0, 0)
 
-[node name="Floor9" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor9" parent="FinishedMesh" unique_id=1715179896 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, -15, 0, 15)
 
-[node name="Floor10" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor10" parent="FinishedMesh" unique_id=2088673115 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, -15, 0, 30)
 
-[node name="Floor11" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor11" parent="FinishedMesh" unique_id=1014394193 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 0, 0, -30)
 
-[node name="Floor12" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor12" parent="FinishedMesh" unique_id=1840184668 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 0, 0, -15)
 
-[node name="Floor13" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor13" parent="FinishedMesh" unique_id=1814313161 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 0, 0, 0)
 
-[node name="Floor14" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor14" parent="FinishedMesh" unique_id=1371242967 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 0, 0, 15)
 
-[node name="Floor15" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor15" parent="FinishedMesh" unique_id=1399454616 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 0, 0, 30)
 
-[node name="Floor16" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor16" parent="FinishedMesh" unique_id=36146204 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 15, 0, -30)
 
-[node name="Floor17" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor17" parent="FinishedMesh" unique_id=564860363 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 15, 0, -15)
 
-[node name="Floor18" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor18" parent="FinishedMesh" unique_id=1298362750 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 15, 0, 0)
 
-[node name="Floor19" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor19" parent="FinishedMesh" unique_id=739805408 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 15, 0, 15)
 
-[node name="Floor20" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor20" parent="FinishedMesh" unique_id=443783691 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 15, 0, 30)
 
-[node name="Floor21" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor21" parent="FinishedMesh" unique_id=1352017003 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 30, 0, -30)
 
-[node name="Floor22" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor22" parent="FinishedMesh" unique_id=1083584535 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 30, 0, -15)
 
-[node name="Floor23" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor23" parent="FinishedMesh" unique_id=991757061 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 30, 0, 0)
 
-[node name="Floor24" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor24" parent="FinishedMesh" unique_id=2080048644 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 30, 0, 15)
 
-[node name="Floor25" parent="FinishedMesh" instance=ExtResource("1_planks")]
+[node name="Floor25" parent="FinishedMesh" unique_id=742310239 instance=ExtResource("1_planks")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 30, 0, 30)
 
-[node name="WallCorner" parent="FinishedMesh" instance=ExtResource("2_wall_corner")]
+[node name="WallCorner" parent="FinishedMesh" unique_id=1390323712 instance=ExtResource("2_wall_corner")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 30, 0, 30)
 
-[node name="WallCorner2" parent="FinishedMesh" instance=ExtResource("2_wall_corner")]
+[node name="WallCorner2" parent="FinishedMesh" unique_id=2137026285 instance=ExtResource("2_wall_corner")]
 transform = Transform3D(0, 0, -15, 0, 15, 0, 15, 0, 0, 30, 0, -30)
 
-[node name="WallCorner3" parent="FinishedMesh" instance=ExtResource("2_wall_corner")]
+[node name="WallCorner3" parent="FinishedMesh" unique_id=1766132541 instance=ExtResource("2_wall_corner")]
 transform = Transform3D(-15, 0, 0, 0, 15, 0, 0, 0, -15, -30, 0, -30)
 
-[node name="WallCorner4" parent="FinishedMesh" instance=ExtResource("2_wall_corner")]
+[node name="WallCorner4" parent="FinishedMesh" unique_id=591100800 instance=ExtResource("2_wall_corner")]
 transform = Transform3D(0, 0, 15, 0, 15, 0, -15, 0, 0, -30, 0, 30)
 
-[node name="WallN" parent="FinishedMesh" instance=ExtResource("3_wall")]
+[node name="WallN" parent="FinishedMesh" unique_id=1230445608 instance=ExtResource("3_wall")]
 transform = Transform3D(0, 0, 15, 0, 15, 0, -15, 0, 0, -15, 0, 30)
 
-[node name="WallN2" parent="FinishedMesh" instance=ExtResource("3_wall")]
+[node name="WallN2" parent="FinishedMesh" unique_id=2051829281 instance=ExtResource("3_wall")]
 transform = Transform3D(0, 0, 15, 0, 15, 0, -15, 0, 0, 0, 0, 30)
 
-[node name="WallN3" parent="FinishedMesh" instance=ExtResource("3_wall")]
+[node name="WallN3" parent="FinishedMesh" unique_id=659765392 instance=ExtResource("3_wall")]
 transform = Transform3D(0, 0, 15, 0, 15, 0, -15, 0, 0, 15, 0, 30)
 
-[node name="WallS" parent="FinishedMesh" instance=ExtResource("4_wall_window_glass")]
+[node name="WallS" parent="FinishedMesh" unique_id=1639282518 instance=ExtResource("4_wall_window_glass")]
 transform = Transform3D(0, 0, -15, 0, 15, 0, 15, 0, 0, -15, 0, -30)
 
-[node name="WallS2" parent="FinishedMesh" instance=ExtResource("5_wall_door")]
+[node name="WallS2" parent="FinishedMesh" unique_id=1021532568 instance=ExtResource("5_wall_door")]
 transform = Transform3D(0, 0, -15, 0, 15, 0, 15, 0, 0, 0, 0, -30)
 
-[node name="WallS3" parent="FinishedMesh" instance=ExtResource("4_wall_window_glass")]
+[node name="WallS3" parent="FinishedMesh" unique_id=122039256 instance=ExtResource("4_wall_window_glass")]
 transform = Transform3D(0, 0, -15, 0, 15, 0, 15, 0, 0, 15, 0, -30)
 
-[node name="WallE" parent="FinishedMesh" instance=ExtResource("3_wall")]
+[node name="WallE" parent="FinishedMesh" unique_id=299634576 instance=ExtResource("3_wall")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 30, 0, -15)
 
-[node name="WallE2" parent="FinishedMesh" instance=ExtResource("3_wall")]
+[node name="WallE2" parent="FinishedMesh" unique_id=543244436 instance=ExtResource("3_wall")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 30, 0, 0)
 
-[node name="WallE3" parent="FinishedMesh" instance=ExtResource("3_wall")]
+[node name="WallE3" parent="FinishedMesh" unique_id=2124937585 instance=ExtResource("3_wall")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 30, 0, 15)
 
-[node name="WallW" parent="FinishedMesh" instance=ExtResource("3_wall")]
+[node name="WallW" parent="FinishedMesh" unique_id=1152941367 instance=ExtResource("3_wall")]
 transform = Transform3D(-15, 0, 0, 0, 15, 0, 0, 0, -15, -30, 0, -15)
 
-[node name="WallW2" parent="FinishedMesh" instance=ExtResource("3_wall")]
+[node name="WallW2" parent="FinishedMesh" unique_id=58652128 instance=ExtResource("3_wall")]
 transform = Transform3D(-15, 0, 0, 0, 15, 0, 0, 0, -15, -30, 0, 0)
 
-[node name="WallW3" parent="FinishedMesh" instance=ExtResource("3_wall")]
+[node name="WallW3" parent="FinishedMesh" unique_id=405587334 instance=ExtResource("3_wall")]
 transform = Transform3D(-15, 0, 0, 0, 15, 0, 0, 0, -15, -30, 0, 15)
 
-[node name="Roof" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof" parent="FinishedMesh" unique_id=363175345 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, -30, 15, -30)
 
-[node name="Roof2" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof2" parent="FinishedMesh" unique_id=374087695 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, -30, 15, -15)
 
-[node name="Roof3" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof3" parent="FinishedMesh" unique_id=483209248 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, -30, 15, 0)
 
-[node name="Roof4" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof4" parent="FinishedMesh" unique_id=1623276869 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, -30, 15, 15)
 
-[node name="Roof5" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof5" parent="FinishedMesh" unique_id=765912211 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, -30, 15, 30)
 
-[node name="Roof6" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof6" parent="FinishedMesh" unique_id=583723068 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, -15, 15, -30)
 
-[node name="Roof7" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof7" parent="FinishedMesh" unique_id=2085404066 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, -15, 15, -15)
 
-[node name="Roof8" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof8" parent="FinishedMesh" unique_id=478121968 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, -15, 15, 0)
 
-[node name="Roof9" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof9" parent="FinishedMesh" unique_id=53734821 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, -15, 15, 15)
 
-[node name="Roof10" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof10" parent="FinishedMesh" unique_id=1153547832 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, -15, 15, 30)
 
-[node name="Roof11" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof11" parent="FinishedMesh" unique_id=569576984 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 0, 15, -30)
 
-[node name="Roof12" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof12" parent="FinishedMesh" unique_id=1576950572 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 0, 15, -15)
 
-[node name="Roof13" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof13" parent="FinishedMesh" unique_id=2063330043 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 0, 15, 0)
 
-[node name="Roof14" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof14" parent="FinishedMesh" unique_id=1002056195 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 0, 15, 15)
 
-[node name="Roof15" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof15" parent="FinishedMesh" unique_id=913408235 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 0, 15, 30)
 
-[node name="Roof16" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof16" parent="FinishedMesh" unique_id=1196256575 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 15, 15, -30)
 
-[node name="Roof17" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof17" parent="FinishedMesh" unique_id=1839521971 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 15, 15, -15)
 
-[node name="Roof18" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof18" parent="FinishedMesh" unique_id=1656297254 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 15, 15, 0)
 
-[node name="Roof19" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof19" parent="FinishedMesh" unique_id=121677302 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 15, 15, 15)
 
-[node name="Roof20" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof20" parent="FinishedMesh" unique_id=1240554386 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 15, 15, 30)
 
-[node name="Roof21" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof21" parent="FinishedMesh" unique_id=19572902 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 30, 15, -30)
 
-[node name="Roof22" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof22" parent="FinishedMesh" unique_id=469935605 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 30, 15, -15)
 
-[node name="Roof23" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof23" parent="FinishedMesh" unique_id=59587592 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 30, 15, 0)
 
-[node name="Roof24" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof24" parent="FinishedMesh" unique_id=883796940 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 30, 15, 15)
 
-[node name="Roof25" parent="FinishedMesh" instance=ExtResource("6_roof_flat")]
+[node name="Roof25" parent="FinishedMesh" unique_id=1365770844 instance=ExtResource("6_roof_flat")]
 transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 30, 15, 30)
 
-[node name="ConstructionMesh" type="MeshInstance3D" parent="."]
+[node name="ConstructionMesh" type="MeshInstance3D" parent="." unique_id=2102844950]
 visible = false
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1399363077]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 8.445, 0)
 shape = SubResource("Shape")
 
-[node name="SelectionRing" type="MeshInstance3D" parent="."]
+[node name="SelectionRing" type="MeshInstance3D" parent="." unique_id=1211242311]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0)
 visible = false
 mesh = SubResource("SelectionRing_mesh")

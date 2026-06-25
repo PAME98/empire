@@ -2,6 +2,11 @@ extends Control
 ## Lobby — attach to a Control root node (lobby.tscn).
 ## FIXED: _set_self_ready RPC moved to NetworkManager (persistent autoload)
 ## so it never targets a freed node after scene change.
+##
+## LOBBY LOCKOUT: if the host has already started the match, a joining client is
+## rejected by NetworkManager (_register_player -> _join_rejected) and this lobby
+## bounces straight back to the menu with the reason shown. Pressing Start also
+## disables the lobby controls so the host can't double-launch.
 
 @onready var status_label:    Label        = $VBoxContainer/StatusLabel
 @onready var player_list:     ItemList     = $VBoxContainer/PlayerList
@@ -20,11 +25,14 @@ const MAP_LABELS := ["Small", "Medium", "Large", "Huge"]
 
 const HOST_PEER_ID := 1
 
+var _starting := false
+
 
 func _ready() -> void:
 	NetworkManager.lobby_updated.connect(_refresh_ui)
 	NetworkManager.player_disconnected.connect(func(_id): _refresh_ui())
 	NetworkManager.server_disconnected.connect(_on_server_disconnected)
+	NetworkManager.join_rejected.connect(_on_join_rejected)
 
 	for label in MAP_LABELS:
 		map_size_option.add_item(label)
@@ -52,7 +60,13 @@ func _refresh_ui() -> void:
 			text += "  ✓"
 		player_list.add_item(text)
 
-	status_label.text = "Players: %d / %d" % [NetworkManager.players.size(), 4]
+	status_label.text = "Players: %d / %d" % [NetworkManager.players.size(), NetworkManager.MAX_PEERS]
+
+	# Once we're launching, freeze the controls and don't re-enable Start.
+	if _starting or NetworkManager.game_started:
+		start_button.disabled = true
+		ready_button.disabled = true
+		return
 
 	if NetworkManager.is_hosting:
 		var others_ready := true
@@ -66,6 +80,12 @@ func _refresh_ui() -> void:
 
 
 func _on_start_pressed() -> void:
+	if _starting:
+		return
+	_starting = true
+	start_button.disabled = true
+	map_size_option.disabled = true
+	status_label.text = "Starting…"
 	var size: Variant = MAP_SIZES[map_size_option.selected]
 	NetworkManager.server_start_game(size)
 
@@ -84,5 +104,12 @@ func _on_leave_pressed() -> void:
 
 
 func _on_server_disconnected() -> void:
+	NetworkManager.disconnect_from_game()
+	get_tree().change_scene_to_file("res://scenes/core/main_menu.tscn")
+
+
+## Host refused our join (game already started / lobby full). The reason is
+## already stored in NetworkManager.last_error for the menu to display.
+func _on_join_rejected(_reason: String) -> void:
 	NetworkManager.disconnect_from_game()
 	get_tree().change_scene_to_file("res://scenes/core/main_menu.tscn")
