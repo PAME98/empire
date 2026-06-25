@@ -4,6 +4,12 @@ extends Building
 ## between the economy half of the game and the RTS-combat half: soldiers
 ## cost food/gold the citizen economy produced, so a healthy economy is a
 ## prerequisite for a real army rather than the two systems being unrelated.
+##
+## NETWORKING: same shape of fix as VillageCenter. Training-queue ticking
+## spends shared resources and decides when a unit is born, so it's host-only;
+## the spawn itself now goes through NetworkCommands.server_spawn_unit so it
+## happens exactly once and gets mirrored to clients, instead of every peer
+## instantiating its own (previously-divergent) copy.
 
 @export var spawn_offset: Vector3 = Vector3(0, 0, 70)
 
@@ -23,6 +29,8 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	super._process(delta)
+	if not GameManager.is_sim_authority():
+		return
 	if not is_constructed or not is_training or train_queue.is_empty():
 		return
 	train_elapsed += delta
@@ -81,10 +89,12 @@ func _start_next() -> void:
 func _complete_training() -> void:
 	var entry = train_queue.front()
 	var scene_path = "res://scenes/units/artillery.tscn" if entry == "artillery" else "res://scenes/units/soldier.tscn"
-	var unit = load(scene_path).instantiate()
-	unit.global_position = global_position + spawn_offset + Vector3(randf_range(-18, 18), 0, randf_range(-18, 18))
-	unit.team = team
-	get_tree().current_scene.get_node("Units").add_child(unit)
+	var spawn_pos = global_position + spawn_offset + Vector3(randf_range(-18, 18), 0, randf_range(-18, 18))
+	# See VillageCenter._complete_recruit() — must spawn exactly once, via
+	# the host-only NetworkCommands path, never via direct instantiate().
+	var unit = NetworkCommands.server_spawn_unit(scene_path, spawn_pos, team)
+	if unit == null:
+		return
 	if entry == "artillery":
 		GameManager.register_artillery(unit)
 	else:

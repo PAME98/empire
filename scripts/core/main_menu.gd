@@ -13,7 +13,7 @@ extends Control
 ##   └── Label          "ErrorLabel"
 
 const GAME_SCENE  := "res://scenes/core/main.tscn"
-const LOBBY_SCENE := "res://scenes/ui/lobby.tscn"
+const LOBBY_SCENE := "res://scenes/network/lobby.tscn"
 
 @onready var small_btn:   Button   = $VBoxContainer/SmallButton
 @onready var medium_btn:  Button   = $VBoxContainer/MediumButton
@@ -34,9 +34,14 @@ func _ready() -> void:
 	large_btn.pressed.connect(func():  _start_solo(Vector2( 4096, 2304)))
 	huge_btn.pressed.connect(func():   _start_solo(Vector2( 6144, 3456)))
 
-	host_btn.pressed.connect(_on_host_pressed)
-	join_btn.pressed.connect(_on_join_pressed)
-	error_label.visible = false
+	if host_btn:
+		host_btn.pressed.connect(_on_host_pressed)
+	else:
+		push_error("main_menu: HostButton not found at $VBoxContainer/HostButton")
+	if join_btn:
+		join_btn.pressed.connect(_on_join_pressed)
+	else:
+		push_error("main_menu: JoinButton not found at $VBoxContainer/JoinRow/JoinButton")
 
 
 func _start_solo(size: Vector2) -> void:

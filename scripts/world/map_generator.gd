@@ -163,7 +163,12 @@ var _ghost            : MeshInstance3D = null
 
 
 func _ready() -> void:
-	_rng.randomize()
+	# Seed from the SHARED map seed so every peer generates the identical world.
+	# randomize() would reseed from the system clock per-machine, which is what
+	# made host and client get different maps. MapSettings.rng_seed is set on all
+	# peers by NetworkManager.start_game() before this scene loads; in
+	# single-player it defaults to 0 (a fixed map) unless the main menu set it.
+	_rng.seed = MapSettings.rng_seed
 	var size: Vector2 = MapSettings.map_size
 	_map_rect = Rect2(Vector2.ZERO, size)
 	_center   = size * 0.5

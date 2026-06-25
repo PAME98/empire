@@ -24,6 +24,17 @@ extends ResourceBuilding
 ## is assumed to fetch them off-screen. This keeps the first iteration playable;
 ## a later pass can add real input-hauling without touching this class's public
 ## surface.
+##
+## NETWORKING: this spends shared per-team resources (GameManager.consume_inputs)
+## and advances this building's own stockpile every frame — exactly the same
+## class of shared/mutating state as ResourceBuilding's gatherers, so the same
+## rule applies: only the peer with simulation authority may run this.
+## GameManager.consume_inputs/has_inputs already route through
+## spend_for_team/can_afford_for_team, and spend_for_team itself now bails out
+## on a non-authoritative peer too — but gating it here as well means a client
+## never even evaluates `_progress`, so its local stockpile/progress state
+## can't silently drift out of sync with the host's while still rendering as
+## if production were happening.
 
 ## Goods consumed from the global stockpile per unit produced.
 ## e.g. {"flour": 1, "water": 1} for a Bakery. Keys may be legacy resources
@@ -46,6 +57,9 @@ func _process(delta: float) -> void:
 	# NB: intentionally does NOT call super (ResourceBuilding._process) —
 	# workshops neither produce freely nor drain a deposit. We re-implement
 	# the produce-into-stockpile step with an input cost.
+	if not GameManager.is_sim_authority():
+		return
+
 	if not is_constructed:
 		return
 

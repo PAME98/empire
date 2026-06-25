@@ -11,6 +11,23 @@ class_name StartPlacement
 ##
 ## Self-contained — just add this node to your main scene. If your map_generator
 ## still calls `_begin_placement()` in its _ready(), delete that one line.
+##
+## NETWORKING: founding the town spawns a Village Center and several citizens.
+## In a networked game this must happen exactly once, decided by ONE player's
+## click, validated/executed by the host, and mirrored to everyone else —
+## never independently on every peer who happens to click their own ghost.
+## Concretely: the ghost/click UI stays local to every peer (it's just visual
+## feedback for "click here to found your town"), but the actual spawn now
+## goes through NetworkCommands instead of instantiating scenes directly:
+##   - In single-player (no multiplayer peer at all) nothing changes — this
+##     peer IS the authority, so it founds the town directly, same as before.
+##   - In a networked game, a non-host peer's click sends a request to the
+##     host (request_found_town) instead of spawning anything locally; the
+##     host validates the spot and does the real spawn, then every peer
+##     (including clients) gets the Village Center + citizens via the normal
+##     building-spawn and unit-spawn replication paths.
+##   - The host's own click founds the town directly (it doesn't need to ask
+##     itself permission), exactly like single-player.
 
 @export var village_center_scene: String = "res://scenes/buildings/village_center.tscn"
 @export var citizen_scene: String = "res://scenes/units/citizen.tscn"
@@ -84,6 +101,13 @@ func _arm() -> void:
 		GameManager.notify("Found your town — left-click a green spot to place your Village Center.")
 
 
+## True if THIS peer is allowed to spawn the town directly: single-player, or
+## the host in a networked game. A non-host client must ask instead (see
+## _found_town below).
+func _can_found_directly() -> bool:
+	return not multiplayer.has_multiplayer_peer() or multiplayer.is_server()
+
+
 func _found_town() -> void:
 	_done = true
 	if is_instance_valid(_ghost):
@@ -92,32 +116,68 @@ func _found_town() -> void:
 	var wp := _mouse_to_ground()
 	var place_pos := Vector3(wp.x, 0.0, wp.z)
 
-	# Any trees under the town vanish.
-	_clear_trees(place_pos, footprint_radius)
+	if not _can_found_directly():
+		# We're a client: don't spawn anything ourselves. Ask the host to do
+		# it; the host validates the spot and the resulting Village Center +
+		# citizens arrive for us through the normal building/unit spawn
+		# replication, same as any other networked spawn.
+		#
+		# NetworkManager is an autoload, referenced directly like everywhere
+		# else in the project. We only reach this branch when
+		# _can_found_directly() is false, which itself requires
+		# multiplayer.has_multiplayer_peer() to be true — so NetworkManager
+		# is guaranteed to be relevant and loaded here.
+		var my_team := NetworkManager.my_team()
+		NetworkCommands.request_found_town.rpc_id(1, place_pos, my_team)
+		set_process(false)
+		set_process_input(false)
+		if GameManager.has_method("notify"):
+			GameManager.notify("Founding town…")
+		return
+
+	# Found directly (single-player or host). Use OUR real team rather than a
+	# hardcoded 0 — in single-player my_team() degrades to 0, and on the host
+	# it's the host's assigned team — so this stays correct either way.
+	_execute_found_town(place_pos, _local_team())
+
+
+## This peer's own team. Falls back to 0 in single-player (no NetworkManager
+## peer / before the registry is populated), matching the rest of the project.
+func _local_team() -> int:
+	var nm := get_node_or_null("/root/NetworkManager")
+	if nm == null:
+		nm = get_node_or_null("/root/network_manager")
+	if nm and nm.has_method("my_team"):
+		return nm.my_team()
+	return 0
+
+
+## The actual spawn logic. Only ever runs where _can_found_directly() was
+## true at the call site: directly from _found_town() in single-player/host,
+## or from NetworkCommands.request_found_town on the host when a client asks.
+func _execute_found_town(place_pos: Vector3, team: int) -> void:
+	# Any trees under the town vanish — this mutates the shared scene tree,
+	# so it must only happen on the authoritative peer too.
+	GameManager.clear_trees_at(place_pos, footprint_radius)
 
 	var vc_pack := load(village_center_scene) as PackedScene
 	if vc_pack:
-		var vc: Node3D = vc_pack.instantiate()
-		_parent("Buildings").add_child(vc)
-		vc.global_position = place_pos
+		var vc := NetworkCommands.server_spawn_building(village_center_scene, place_pos, team)
+		if vc == null:
+			push_warning("StartPlacement: server_spawn_building returned null for " + village_center_scene)
 	else:
 		push_warning("StartPlacement: could not load " + village_center_scene)
 
-	var cit_pack := load(citizen_scene) as PackedScene
-	if cit_pack:
-		var units := _parent("Units")
-		for i in citizen_count:
-			var angle := (TAU / citizen_count) * i
-			var offset := Vector3(cos(angle), 0.0, sin(angle)) * citizen_spawn_radius
-			var cit: Node3D = cit_pack.instantiate()
-			units.add_child(cit)
-			cit.global_position = place_pos + offset
-			if cit.has_method("setup_as_adult"):
-				cit.setup_as_adult()
-			if GameManager.has_method("register_population"):
-				GameManager.register_population(cit)
-	else:
-		push_warning("StartPlacement: could not load " + citizen_scene)
+	for i in citizen_count:
+		var angle := (TAU / citizen_count) * i
+		var offset := Vector3(cos(angle), 0.0, sin(angle)) * citizen_spawn_radius
+		var cit = NetworkCommands.server_spawn_unit(citizen_scene, place_pos + offset, team)
+		if cit == null:
+			continue
+		if cit.has_method("setup_as_adult"):
+			cit.setup_as_adult()
+		if GameManager.has_method("register_population"):
+			GameManager.register_population(cit)
 
 	if "is_initial_placement" in GameManager:
 		GameManager.is_initial_placement = false
@@ -160,21 +220,6 @@ func _is_spot_valid(wp: Vector3) -> bool:
 				or c.is_in_group("water_sources") or c.is_in_group("buildings")):
 			return false
 	return true
-
-
-func _clear_trees(world_pos: Vector3, radius: float) -> void:
-	var space_state = get_world_3d().direct_space_state
-	var query := PhysicsShapeQueryParameters3D.new()
-	var shape := CylinderShape3D.new()
-	shape.radius = radius
-	shape.height = 60.0
-	query.shape = shape
-	query.transform = Transform3D(Basis.IDENTITY, world_pos)
-	query.collision_mask = 1
-	for hit in space_state.intersect_shape(query, 32):
-		var c = hit.get("collider")
-		if c and is_instance_valid(c) and c.is_in_group("wood_sources"):
-			c.queue_free()
 
 
 func _camera() -> Camera3D:

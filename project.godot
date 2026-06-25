@@ -22,6 +22,8 @@ MapSettings="*uid://f5osw15nbhyj"
 MeshSwapper="*uid://dvj2tcph4cr1c"
 TownKitBuilder="*uid://ck00gyu8a0oi2"
 Hud="*uid://b0n6nwqeejl28"
+NetworkManager="*uid://cvc3wbcsvf23t"
+NetworkCommands="*uid://j2a8os5rmkw7"
 
 [display]
 

@@ -13,6 +13,19 @@ extends Building
 ## production drains that mountain's pool for `yield_resource`; once the pool
 ## is empty, production stops. Buildings with an empty `deposit_group` (Farm,
 ## Lumber Camp) produce freely.
+##
+## NETWORKING: `_process` here mutates `stockpile` (this building's own state)
+## and, for deposit-backed buildings, calls `host_deposit.harvest(...)` which
+## mutates a Mountain's stone/iron pool — a piece of state SHARED by every
+## building bound to that mountain, and visible to every peer. If this ran on
+## every client too, each one would independently drain the mountain and
+## accumulate its own stockpile, and those numbers would diverge from the
+## host's within seconds. It must only run where GameManager.is_sim_authority()
+## is true. worker_count()/deposit_remaining() stay safe to call anywhere
+## since they only read state, and that state is whatever it last was on this
+## peer — host-correct on the host, and (for now) display-only on a client
+## until/unless a building-state sync is added alongside the existing
+## resource/unit syncs.
 
 @export var max_workers: int = 3
 @export var base_production_rate: float = 1.0  # stockpile units / second / worker
@@ -35,6 +48,12 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	super._process(delta)
+
+	# Production is shared simulation state (this building's stockpile, and
+	# for deposit-backed buildings, the bound Mountain's pool too). Only the
+	# peer with simulation authority may advance it.
+	if not GameManager.is_sim_authority():
+		return
 
 	if not is_constructed:
 		return

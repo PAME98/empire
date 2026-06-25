@@ -238,11 +238,12 @@ func _finish_left_drag(end_screen: Vector2) -> void:
 
 
 func _handle_single_click(screen_pos: Vector2) -> void:
-	var obj := _raycast(screen_pos)
+	var obj :Variant = _raycast(screen_pos)
 	if obj == null:          GameManager.clear_selection(); return
 	if obj is Unit and obj.is_selectable_by_player():
 		GameManager.select_units([obj])
-	elif obj is Building:    GameManager.select_building(obj)
+	elif obj is Building and obj.is_selectable_by_player():
+		GameManager.select_building(obj)
 	elif obj is Mountain or obj is ResourceNode:
 		GameManager.select_resource_node(obj)
 	else:
@@ -250,7 +251,8 @@ func _handle_single_click(screen_pos: Vector2) -> void:
 
 
 # ---------------------------------------------------------------------------
-# Right-click — send orders via NetworkCommands, never directly
+# Right-click — send orders via NetworkCommands.
+# Host executes locally; clients RPC the host. (See _send_command.)
 # ---------------------------------------------------------------------------
 func _handle_right_click() -> void:
 	if GameManager.selected_units.is_empty(): return
@@ -260,29 +262,52 @@ func _handle_right_click() -> void:
 
 	# Collect unit_ids of selected units we own
 	var my_team  := NetworkManager.my_team()
-	var unit_ids := GameManager.selected_units.filter(
+	var owned := GameManager.selected_units.filter(
 		func(u): return is_instance_valid(u) and u.is_alive and u.team == my_team
-	).map(func(u): return u.get_meta("unit_id", -1)).filter(func(id): return id != -1)
+	)
+	var unit_ids := owned.map(func(u): return u.get_meta("unit_id", -1)).filter(func(id): return id != -1)
 
-	if unit_ids.is_empty(): return
+	if unit_ids.is_empty():
+		# Helps catch the two distinct failure modes instead of silently doing
+		# nothing: nothing owned selected vs. owned units missing a unit_id
+		# (i.e. spawned outside server_spawn_unit and never replicated/tagged).
+		if not owned.is_empty():
+			GameManager.notify("Selected units have no network id — they weren't spawned through the host.")
+		return
 
-	if target == null or target is not Unit:
-		if target != null and target.is_in_group("enemies"):
-			NetworkCommands.request_attack.rpc_id(1, unit_ids, target.get_path())
-		elif target != null and (target.is_in_group("resources")
-				or target.is_in_group("farms") or target.is_in_group("lumber_camps")
-				or target.is_in_group("quarries") or target.is_in_group("mines")):
-			NetworkCommands.request_gather.rpc_id(1, unit_ids, target.get_path())
-		elif target != null and target.is_in_group("construction_sites"):
-			NetworkCommands.request_build_on.rpc_id(1, unit_ids, target.get_path())
-		else:
-			NetworkCommands.request_move.rpc_id(1, unit_ids, ground)
+	# Resolve the order from what we clicked. Priority: attack a foreign-team
+	# target (unit OR building) > gather a resource > build a construction site
+	# > move to the ground. "Enemy" is anything on a DIFFERENT team than us —
+	# not a fixed "enemies" group, which never matched in a team game.
+	if target != null and (target is Unit or target is Building) \
+			and "team" in target and target.team != my_team \
+			and (not ("is_alive" in target) or target.is_alive):
+		_send_command("request_attack", [unit_ids, target.get_path()])
+	elif target != null and target is not Unit and (target.is_in_group("resources")
+			or target.is_in_group("farms") or target.is_in_group("lumber_camps")
+			or target.is_in_group("quarries") or target.is_in_group("mines")):
+		_send_command("request_gather", [unit_ids, target.get_path()])
+	elif target != null and target is not Unit and target.is_in_group("construction_sites") \
+			and "team" in target and target.team == my_team:
+		_send_command("request_build_on", [unit_ids, int(target.get_meta("building_net_id", -1))])
 	else:
-		NetworkCommands.request_move.rpc_id(1, unit_ids, ground)
+		_send_command("request_move", [unit_ids, ground])
 
 
 # ---------------------------------------------------------------------------
-# Building placement  — ghost is local; confirmation goes via RPC
+# Single command dispatch point.
+# ---------------------------------------------------------------------------
+## On the host: call the handler directly (a peer can't RPC itself).
+## On a client: RPC the host (peer 1), which validates and executes.
+func _send_command(method: String, args: Array) -> void:
+	if multiplayer.is_server():
+		NetworkCommands.callv(method, args)
+	else:
+		Callable(NetworkCommands, method).bindv(args).rpc_id(1)
+
+
+# ---------------------------------------------------------------------------
+# Building placement  — ghost is local; confirmation goes via _send_command
 # ---------------------------------------------------------------------------
 func _handle_placement_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
@@ -296,7 +321,7 @@ func _handle_placement_input(event: InputEvent) -> void:
 
 func _confirm_placement() -> void:
 	var building_id := GameManager.placement_building_id
-	var cost        := GameManager.COSTS.get(building_id, {})
+	var cost        :Variant = GameManager.COSTS.get(building_id, {})
 	if cost.is_empty():
 		GameManager.cancel_building_placement(); return
 	if not GameManager.can_afford(cost):
@@ -315,7 +340,7 @@ func _confirm_placement() -> void:
 	var pos := _snap_to_grid(_ground_point(_mouse()), my_ext)
 
 	# Send to host for validation + execution
-	NetworkCommands.request_place_building.rpc_id(1, building_id, pos)
+	_send_command("request_place_building", [building_id, pos])
 	GameManager.cancel_building_placement()
 
 
@@ -356,7 +381,7 @@ func _confirm_attack_position() -> void:
 		func(u): return is_instance_valid(u) and u.is_alive and u is Artillery and u.team == my_team
 	).map(func(u): return u.get_meta("unit_id", -1)).filter(func(id): return id != -1)
 	if unit_ids.is_empty(): return
-	NetworkCommands.request_attack_position.rpc_id(1, unit_ids, pos)
+	_send_command("request_attack_position", [unit_ids, pos])
 	GameManager.cancel_attack_position_targeting()
 
 
@@ -396,7 +421,7 @@ func _clear_ghost_model() -> void:
 
 func _build_ghost_model(building_id: String) -> void:
 	_ghost_footprint = 36.0 * Building.GLOBAL_BUILDING_SCALE
-	var path         := BUILDING_SCENES.get(building_id)
+	var path         :Variant = BUILDING_SCENES.get(building_id)
 	if path == null: _ghost_fallback_box(_ghost_footprint); return
 	var packed       := load(path) as PackedScene
 	if packed == null: _ghost_fallback_box(_ghost_footprint); return
@@ -422,7 +447,7 @@ func _scene_footprint(inst: Node, s: float) -> float:
 	var col  := inst.get_node_or_null("CollisionShape3D")
 	var base := 36.0
 	if col and col.shape:
-		var sh := col.shape
+		var sh :Variant = col.shape
 		if sh is BoxShape3D:      base = maxf(sh.size.x, sh.size.z) * 0.5
 		elif sh is CylinderShape3D: base = sh.radius
 		elif sh is SphereShape3D:   base = sh.radius
@@ -434,7 +459,7 @@ func _scene_extents(inst: Node, s: float) -> Vector2:
 	var hx  := 24.0
 	var hz  := 24.0
 	if col and col.shape:
-		var sh := col.shape
+		var sh :Variant = col.shape
 		if sh is BoxShape3D:        hx = sh.size.x * 0.5; hz = sh.size.z * 0.5
 		elif sh is CylinderShape3D: hx = sh.radius;       hz = sh.radius
 	return Vector2(hx, hz) * s

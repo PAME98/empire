@@ -16,6 +16,15 @@ extends CharacterBody3D
 ## If this unit's scene doesn't have a NavigationAgent3D child, one is
 ## created automatically in _ready() so existing .tscn files don't need to
 ## be hand-edited.
+##
+## NETWORKING: this is simulation logic — it moves the unit, resolves
+## collisions, and decides when an order is "done" (_on_reached_target).
+## On a client that isn't the host, none of this may run locally: the host
+## is the only peer allowed to decide where a unit actually is. Clients
+## instead receive authoritative positions via NetworkCommands.sync_unit_positions
+## and just snap to them. _physics_process below is gated accordingly so
+## adding a host check here, once, covers every unit type (Citizen, Soldier,
+## Artillery) without touching their individual scripts.
 
 signal died(unit)
 
@@ -48,6 +57,27 @@ var _stall_timer: float = 0.0
 const _STALL_TIME_THRESHOLD: float = 0.6   # seconds of near-zero progress before recovering
 const _STALL_MOVE_EPSILON: float = 2.0     # units of movement below which we count as "not progressing"
 
+# --- Client-side position smoothing -----------------------------------------
+# Clients don't simulate movement; they receive ~10 position samples/second
+# from the host. Snapping global_position straight to each sample makes units
+# visibly teleport (the "laggy" stutter). Instead the client stores each sample
+# as _net_target and lerps toward it every frame for smooth motion. Only used
+# on non-authority peers; the host moves via real physics and ignores this.
+var _net_target: Vector3 = Vector3.ZERO
+var _has_net_target: bool = false
+## Higher = snappier/tighter to the host, lower = smoother but more lag. 12
+## reaches the target in ~1 sample interval without visible rubber-banding.
+const NET_LERP_SPEED: float = 12.0
+
+
+func set_network_target(pos: Vector3) -> void:
+	# Called on clients from NetworkCommands.sync_unit_positions. First sample
+	# snaps (no prior reference to interpolate from); later samples interpolate.
+	if not _has_net_target:
+		global_position = pos
+	_net_target = pos
+	_has_net_target = true
+
 
 func _ready() -> void:
 	health = max_health
@@ -56,6 +86,20 @@ func _ready() -> void:
 		selection_ring.visible = false
 	_update_health_bar()
 	_setup_navigation()
+
+
+## True if this peer is allowed to actually simulate movement/AI for units —
+## i.e. single-player, or the host in a networked game. Clients still run
+## _setup_navigation (harmless, just configures an agent that goes unused)
+## but never step the agent or move the body themselves; they wait for
+## NetworkCommands.sync_unit_positions to set global_position instead.
+##
+## GameManager is an autoload, referenced directly the same way every other
+## script in this project references it (Citizen, ResourceBuilding, etc.) —
+## no existence check needed, and Engine.has_singleton() would be the wrong
+## tool anyway since autoloads aren't Engine singletons.
+func _has_movement_authority() -> bool:
+	return GameManager.is_sim_authority()
 
 
 func _setup_navigation() -> void:
@@ -118,6 +162,18 @@ func _setup_navigation() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	# Movement/pathing is simulation state. Only the host (or a single-player
+	# session, which is its own authority) may actually step it; a client
+	# instead has its position overwritten by sync_unit_positions. Running
+	# this on a client too would have it compute its OWN path/avoidance
+	# independently of the host's, drifting apart frame by frame.
+	if not _has_movement_authority():
+		# Client: smoothly interpolate toward the latest synced position instead
+		# of snapping to it, so movement looks continuous between the ~10Hz
+		# samples rather than teleporting.
+		if _has_net_target:
+			global_position = global_position.lerp(_net_target, clampf(NET_LERP_SPEED * delta, 0.0, 1.0))
+		return
 	if is_moving:
 		_step_toward_target(delta)
 
@@ -286,7 +342,18 @@ func set_selected(value: bool) -> void:
 
 
 func is_selectable_by_player() -> bool:
-	return team == 0 and is_alive
+	return team == _player_team() and is_alive
+
+
+## The local player's team — what they're allowed to select and command.
+## Single-player is team 0; in multiplayer it's this peer's assigned team.
+func _player_team() -> int:
+	var nm := get_node_or_null("/root/NetworkManager")
+	if nm == null:
+		nm = get_node_or_null("/root/network_manager")
+	if nm and nm.has_method("my_team"):
+		return nm.my_team()
+	return 0
 
 
 # ---------------------------------------------------------------------------
@@ -331,6 +398,15 @@ func take_damage(amount: int, attacker = null) -> void:
 		_on_attacked(attacker)
 
 
+## Lets the position/health sync ticker push an authoritative health value to
+## clients without running combat logic locally. Purely cosmetic on the
+## receiving end (health bar + death is still decided host-side and mirrored
+## via remove_population/queue_free through the normal die() path).
+func set_health_display(value: int) -> void:
+	health = value
+	_update_health_bar()
+
+
 func _on_attacked(_attacker) -> void:
 	pass
 
@@ -345,4 +421,7 @@ func die(_cause: String = "unknown") -> void:
 		return
 	is_alive = false
 	died.emit(self)
+	# Mirror the death to clients (host-only inside server_kill_unit) so their
+	# copy of this unit is freed too, instead of lingering as an undying corpse.
+	NetworkCommands.server_kill_unit(self, _cause)
 	queue_free()

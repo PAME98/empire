@@ -6,6 +6,12 @@ extends Unit
 ## Idle soldiers (no order) will engage nearby enemies on their own so a
 ## standing army actually defends itself, but never wander off to gather or
 ## build — that ambiguity was part of what broke the old prototype.
+##
+## NETWORKING: target acquisition, pursuit, and applying damage are all
+## simulation decisions. They must only run where GameManager.is_sim_authority()
+## is true (single-player, or the host). On a client, this unit just sits
+## still locally except for whatever sync_unit_positions overwrites its
+## global_position to each tick — _process below is gated accordingly.
 
 @export var attack_damage: int = 14
 @export var attack_range: float = 46.0
@@ -15,6 +21,12 @@ extends Unit
 var attack_target = null
 var has_player_order: bool = false
 var _attack_timer: float = 0.0
+
+## Attack stance, set from the unit order menu (HUD). When false, the soldier
+## never auto-acquires targets — it only fights when given an explicit attack
+## order. Defaults true (classic RTS aggressive stance). Synced to clients via
+## NetworkCommands so both peers agree, though only the host acts on it.
+var auto_attack: bool = true
 
 @onready var sprite: Node = get_node_or_null("Mesh")
 
@@ -28,13 +40,25 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if not _has_movement_authority():
+		return
+
 	if not is_alive:
 		return
 
 	if _has_valid_attack_target():
 		_pursue_and_attack(delta)
-	elif not has_player_order:
+	elif not has_player_order and auto_attack:
 		_look_for_nearby_enemy()
+
+
+## Called from the order menu (via NetworkCommands so it's host-authoritative).
+## In hold/no-attack mode the soldier drops any auto-acquired target but keeps
+## an explicit player-ordered one.
+func set_auto_attack(value: bool) -> void:
+	auto_attack = value
+	if not value and not has_player_order:
+		attack_target = null
 
 
 func _has_valid_attack_target() -> bool:
@@ -59,14 +83,23 @@ func _pursue_and_attack(delta: float) -> void:
 
 
 func _look_for_nearby_enemy() -> void:
+	# "Enemy" = any living unit (or building) on a DIFFERENT team. The old code
+	# scanned an "enemies" group that nothing populates in a team game, so
+	# soldiers never auto-acquired. Scan units + buildings and compare teams.
 	var nearest = null
 	var nearest_dist = aggro_range
-	for enemy in get_tree().get_nodes_in_group("enemies"):
-		if is_instance_valid(enemy):
-			var d = global_position.distance_to(enemy.global_position)
+	for grp in ["units", "buildings"]:
+		for other in get_tree().get_nodes_in_group(grp):
+			if not is_instance_valid(other) or other == self:
+				continue
+			if not ("team" in other) or other.team == team:
+				continue
+			if "is_alive" in other and not other.is_alive:
+				continue
+			var d = global_position.distance_to(other.global_position)
 			if d < nearest_dist:
 				nearest_dist = d
-				nearest = enemy
+				nearest = other
 	if nearest:
 		attack_target = nearest
 

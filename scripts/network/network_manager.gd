@@ -28,8 +28,10 @@ func host_game() -> Error:
 	if err != OK:
 		return err
 	multiplayer.multiplayer_peer = peer
-	multiplayer.peer_connected.connect(_on_peer_connected)
-	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
+	if not multiplayer.peer_connected.is_connected(_on_peer_connected):
+		multiplayer.peer_connected.connect(_on_peer_connected)
+	if not multiplayer.peer_disconnected.is_connected(_on_peer_disconnected):
+		multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	is_hosting = true
 	# Register host as team 0
 	players[1] = {"name": my_name, "team": 0, "ready": false}
@@ -43,12 +45,16 @@ func join_game(address: String) -> Error:
 	if err != OK:
 		return err
 	multiplayer.multiplayer_peer = peer
-	multiplayer.server_disconnected.connect(
-		func(): server_disconnected.emit()
-	)
-	multiplayer.connected_to_server.connect(_on_connected_to_server)
+	if not multiplayer.server_disconnected.is_connected(_on_server_disconnected):
+		multiplayer.server_disconnected.connect(_on_server_disconnected)
+	if not multiplayer.connected_to_server.is_connected(_on_connected_to_server):
+		multiplayer.connected_to_server.connect(_on_connected_to_server)
 	is_hosting = false
 	return OK
+
+
+func _on_server_disconnected() -> void:
+	server_disconnected.emit()
 
 
 func disconnect_from_game() -> void:

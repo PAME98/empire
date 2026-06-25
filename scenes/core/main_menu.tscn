@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" uid="uid://bqumej66ntsqm" path="res://scripts/core/main_menu.gd" id="1_menu"]
 
-[node name="MainMenu" type="Control" unique_id=490282865]
+[node name="MainMenu" type="Control" unique_id=1996423917]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -11,52 +11,73 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_menu")
 
-[node name="Background" type="ColorRect" parent="." unique_id=234664290]
-layout_mode = 0
-anchor_right = 1.0
-anchor_bottom = 1.0
-color = Color(0.1, 0.18, 0.1, 1)
-
-[node name="VBoxContainer" type="VBoxContainer" parent="." unique_id=404150421]
-layout_mode = 0
+[node name="VBoxContainer" type="VBoxContainer" parent="." unique_id=1805462708]
+layout_mode = 1
+anchors_preset = 8
 anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
 offset_left = -160.0
-offset_top = -160.0
+offset_top = -220.0
 offset_right = 160.0
-offset_bottom = 160.0
-theme_override_constants/separation = 16
+offset_bottom = 220.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 8
 
-[node name="TitleLabel" type="Label" parent="VBoxContainer" unique_id=630726928]
+[node name="TitleLabel" type="Label" parent="VBoxContainer" unique_id=1599792357]
 layout_mode = 2
-theme_override_font_sizes/font_size = 32
-text = "My RTS Game"
-horizontal_alignment = 1
-
-[node name="SubtitleLabel" type="Label" parent="VBoxContainer" unique_id=842110588]
-layout_mode = 2
-theme_override_font_sizes/font_size = 16
+theme_override_font_sizes/font_size = 24
 text = "Select Map Size"
 horizontal_alignment = 1
 
-[node name="SmallButton" type="Button" parent="VBoxContainer" unique_id=864298358]
-custom_minimum_size = Vector2(320, 40)
+[node name="SmallButton" type="Button" parent="VBoxContainer" unique_id=2090462414]
 layout_mode = 2
-text = "Small  (1280 × 720)"
+text = "Small (1280x720)"
 
-[node name="MediumButton" type="Button" parent="VBoxContainer" unique_id=1218756406]
-custom_minimum_size = Vector2(320, 40)
+[node name="MediumButton" type="Button" parent="VBoxContainer" unique_id=321759505]
 layout_mode = 2
-text = "Medium  (2560 × 1440)"
+text = "Medium (2560x1440)"
 
-[node name="LargeButton" type="Button" parent="VBoxContainer" unique_id=1790894985]
-custom_minimum_size = Vector2(320, 40)
+[node name="LargeButton" type="Button" parent="VBoxContainer" unique_id=1887295047]
 layout_mode = 2
-text = "Large  (4096 × 2304)"
+text = "Large (4096x2304)"
 
-[node name="HugeButton" type="Button" parent="VBoxContainer" unique_id=1131414045]
-custom_minimum_size = Vector2(320, 40)
+[node name="HugeButton" type="Button" parent="VBoxContainer" unique_id=2062489158]
 layout_mode = 2
-text = "Huge  (6144 × 3456)"
+text = "Huge (6144x3456)"
+
+[node name="HSeparator" type="HSeparator" parent="VBoxContainer" unique_id=396862665]
+layout_mode = 2
+
+[node name="MultiplayerLabel" type="Label" parent="VBoxContainer" unique_id=1580039367]
+layout_mode = 2
+text = "— Multiplayer —"
+horizontal_alignment = 1
+
+[node name="NameEdit" type="LineEdit" parent="VBoxContainer" unique_id=202123027]
+layout_mode = 2
+placeholder_text = "Your name"
+
+[node name="HostButton" type="Button" parent="VBoxContainer" unique_id=110562231]
+layout_mode = 2
+text = "Host Game"
+
+[node name="JoinRow" type="HBoxContainer" parent="VBoxContainer" unique_id=241848597]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="AddressEdit" type="LineEdit" parent="VBoxContainer/JoinRow" unique_id=155850238]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Server IP"
+
+[node name="JoinButton" type="Button" parent="VBoxContainer/JoinRow" unique_id=807366197]
+layout_mode = 2
+text = "Join"
+
+[node name="ErrorLabel" type="Label" parent="VBoxContainer" unique_id=506022343]
+modulate = Color(1, 0.4, 0.4, 1)
+layout_mode = 2
+horizontal_alignment = 1

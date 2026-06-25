@@ -158,6 +158,23 @@ func set_selected(value: bool) -> void:
 	if selection_ring:
 		selection_ring.visible = value
 
+
+## True if the LOCAL player owns this building and may select/command it.
+## Without this, every peer could select any building (the host, as team 0,
+## could select and command the client's buildings). Mirrors Unit's gate.
+func is_selectable_by_player() -> bool:
+	return team == _player_team()
+
+
+## This peer's team — 0 in single-player, else the assigned multiplayer team.
+func _player_team() -> int:
+	var nm := get_node_or_null("/root/NetworkManager")
+	if nm == null:
+		nm = get_node_or_null("/root/network_manager")
+	if nm and nm.has_method("my_team"):
+		return nm.my_team()
+	return 0
+
 func take_damage(amount: int) -> void:
 	health -= amount
 	if health <= 0:

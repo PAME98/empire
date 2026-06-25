@@ -71,9 +71,19 @@ func _start_next_recruit() -> void:
 
 
 func _complete_recruit() -> void:
-	var citizen = preload("res://scenes/units/citizen.tscn").instantiate()
-	citizen.global_position = global_position + spawn_offset + Vector3(randf_range(-18, 18), 0, randf_range(-18, 18))
-	citizen.team = team
-	get_tree().current_scene.get_node("Units").add_child(citizen)
-	citizen.setup_as_adult()
+	# Recruiting mutates shared state, so only the authority spawns. The unit
+	# MUST go through server_spawn_unit so it gets a unit_id and is replicated
+	# to every peer — instantiating locally makes it invisible to clients and
+	# uncommandable (no unit_id for the order filter to reference).
+	if not GameManager.is_sim_authority():
+		return
+	var spawn_pos := global_position + spawn_offset \
+		+ Vector3(randf_range(-18, 18), 0, randf_range(-18, 18))
+	var citizen = NetworkCommands.server_spawn_unit(
+		"res://scenes/units/citizen.tscn", spawn_pos, team
+	)
+	if citizen == null:
+		return
+	if citizen.has_method("setup_as_adult"):
+		citizen.setup_as_adult()
 	GameManager.register_population(citizen)

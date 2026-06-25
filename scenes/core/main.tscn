@@ -11,6 +11,7 @@
 [ext_resource type="Script" uid="uid://b23jp0da2u5ms" path="res://scripts/world/map_generator.gd" id="9_85g3d"]
 [ext_resource type="Script" uid="uid://d0ri57m1quegx" path="res://scenes/ui/hud_skin.gd" id="9_ocd3q"]
 [ext_resource type="PackedScene" path="res://scenes/world/start_placement.tscn" id="10_fu2j5"]
+[ext_resource type="Script" uid="uid://dpplxvrwgxv4l" path="res://scripts/network/unit_sync_ticker.gd" id="12_5xrq8"]
 
 [sub_resource type="Environment" id="Env"]
 background_mode = 1
@@ -398,3 +399,6 @@ script = ExtResource("9_ocd3q")
 script = ExtResource("9_85g3d")
 
 [node name="StartPlacement" parent="." unique_id=416961857 instance=ExtResource("10_fu2j5")]
+
+[node name="UnitSyncTicker" type="Node" parent="." unique_id=394240520]
+script = ExtResource("12_5xrq8")

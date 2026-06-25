@@ -29,6 +29,8 @@ const MAP_SIZES := [
 ]
 const MAP_LABELS := ["Small", "Medium", "Large", "Huge"]
 
+const HOST_PEER_ID := 1
+
 
 func _ready() -> void:
 	NetworkManager.lobby_updated.connect(_refresh_ui)
@@ -40,8 +42,8 @@ func _ready() -> void:
 		map_size_option.add_item(label)
 	map_size_option.selected = 0
 
-	start_button.visible = NetworkManager.is_hosting
-	ready_button.visible = not NetworkManager.is_hosting
+	start_button.visible    = NetworkManager.is_hosting
+	ready_button.visible    = not NetworkManager.is_hosting
 	map_size_option.visible = NetworkManager.is_hosting
 
 	start_button.pressed.connect(_on_start_pressed)
@@ -54,20 +56,32 @@ func _ready() -> void:
 func _refresh_ui() -> void:
 	player_list.clear()
 	for pid in NetworkManager.players:
-		var p    := NetworkManager.players[pid]
+		var p    :Variant = NetworkManager.players[pid]
 		var text := "%s  (Team %d)" % [p["name"], p["team"]]
-		if p.get("ready", false): text += "  ✓"
+		if pid == HOST_PEER_ID:
+			text += "  [host]"
+		elif p.get("ready", false):
+			text += "  ✓"
 		player_list.add_item(text)
 
 	status_label.text = "Players: %d / %d" % [NetworkManager.players.size(), 4]
 
 	if NetworkManager.is_hosting:
-		var all_ready := NetworkManager.players.values().all(func(p): return p.get("ready", false))
-		start_button.disabled = not all_ready
+		# The host decides when to start and never readies up, so gate Start on
+		# every NON-host player being ready. With no other players yet (solo
+		# testing) the loop finds none and Start is enabled immediately.
+		var others_ready := true
+		for pid in NetworkManager.players:
+			if pid == HOST_PEER_ID:
+				continue
+			if not NetworkManager.players[pid].get("ready", false):
+				others_ready = false
+				break
+		start_button.disabled = not others_ready
 
 
 func _on_start_pressed() -> void:
-	var size := MAP_SIZES[map_size_option.selected]
+	var size :Variant = MAP_SIZES[map_size_option.selected]
 	NetworkManager.server_start_game(size)
 
 

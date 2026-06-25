@@ -12,6 +12,15 @@ extends Unit
 ## Every shot has a short aim/windup before it actually lands, telegraphed
 ## by the barrel swinging onto the target and a shrinking ring at the
 ## impact point, so a hit never feels instant or unfair.
+##
+## NETWORKING: aiming, firing, and splash damage are simulation decisions —
+## exactly the kind of thing that must happen in ONE place. _process is
+## gated by GameManager.is_sim_authority() (via Unit._has_movement_authority)
+## so a client never independently fires/damages anything; it only sees the
+## explosion VFX and damage results the host already applied, by virtue of
+## the explosion node itself being spawned host-side and visible to everyone
+## in the shared scene tree, and health changes arriving over the position
+## sync ticker.
 
 @export var attack_damage: int = 50
 @export var splash_radius: float = 90.0
@@ -48,6 +57,9 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if not _has_movement_authority():
+		return
+
 	if not is_alive:
 		return
 

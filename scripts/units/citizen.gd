@@ -10,6 +10,14 @@ extends Unit
 ## it, right-click a tree/farm/quarry/build-site to give it a direct order.
 ## Player orders always take priority over the autonomous AI; the AI only
 ## drives a citizen when nobody has told it what to do.
+##
+## NETWORKING: everything in this file is simulation state (job assignment,
+## harvesting, delivery, building progress) — it must only ever run on the
+## peer with simulation authority (single-player, or the host in a networked
+## game). _process is gated accordingly. Clients still get _refresh_appearance
+## calls (driven by life_stage/current_job/carried_resource, which arrive via
+## NetworkCommands' citizen-state sync) so they SEE the right model/colour,
+## they just never decide it themselves.
 
 enum LifeStage { CHILD, ADULT, ELDER }
 enum Job { NONE, FARMER, WOODCUTTER, MINER, BUILDER, TRADER, WATERCARRIER }
@@ -81,11 +89,20 @@ func _ready() -> void:
 	add_to_group("citizens")
 	speed = 85.0
 	_refresh_appearance()
-	if life_stage == LifeStage.ADULT:
+	if life_stage == LifeStage.ADULT and _has_movement_authority():
 		_try_autofind_job()
 
 
 func _process(delta: float) -> void:
+	# AI/job/delivery/building logic is simulation state — it decides what
+	# the citizen DOES, which must be decided in exactly one place (the host)
+	# or two peers will send the same citizen down different paths the moment
+	# their local timers/RNG drift apart even slightly. Clients just wait for
+	# state (position via sync_unit_positions, life_stage/job/carry via the
+	# citizen-state sync) and re-render via _refresh_appearance.
+	if not _has_movement_authority():
+		return
+
 	if not is_alive:
 		return
 
@@ -114,7 +131,8 @@ func setup_as_adult(starting_job: Job = Job.NONE) -> void:
 
 
 # ---------------------------------------------------------------------------
-# Aging — called once per in-game year by GameManager
+# Aging — called once per in-game year by GameManager (host only; see
+# GameManager._yearly_tick, which is itself gated by is_sim_authority()).
 # ---------------------------------------------------------------------------
 func age_up() -> void:
 	age += 1
@@ -456,13 +474,12 @@ func _continue_delivery() -> void:
 		move_to(center.global_position)
 		return
 	stop()
-	match carried_resource:
-		"food": GameManager.add_resources(carried_amount, 0, 0, 0, 0, 0)
-		"wood": GameManager.add_resources(0, carried_amount, 0, 0, 0, 0)
-		"stone": GameManager.add_resources(0, 0, carried_amount, 0, 0, 0)
-		"gold": GameManager.add_resources(0, 0, 0, carried_amount, 0, 0)
-		"iron": GameManager.add_resources(0, 0, 0, 0, carried_amount, 0)
-		"water": GameManager.add_resources(0, 0, 0, 0, 0, carried_amount)
+	# Credit THIS citizen's team, not GameManager.add_resources() — that helper
+	# targets _my_team(), which on the host (who runs every citizen's AI) is
+	# always team 0, so a client's citizens were depositing into the host's
+	# pool. add_resources_for_team is explicit and host-authoritative.
+	if carried_amount > 0 and carried_resource != "":
+		GameManager.add_resources_for_team(team, {carried_resource: carried_amount})
 	carried_amount = 0
 	carried_resource = ""
 	is_delivering = false
@@ -529,11 +546,14 @@ func die(cause: String = "unknown") -> void:
 	is_alive = false
 	GameManager.remove_population(self, cause)
 	died.emit(self)
+	NetworkCommands.server_kill_unit(self, cause)
 	queue_free()
 
 
 # ---------------------------------------------------------------------------
-# Appearance
+# Appearance — purely cosmetic, safe to call on any peer including clients.
+# Driven by life_stage/current_job/carried_resource, which on a client are
+# set only by incoming network state, never decided locally.
 # ---------------------------------------------------------------------------
 func _set_mesh_color(node: Node, c: Color) -> void:
 	# Per-instance colour via material_override, so recolouring one citizen
@@ -593,6 +613,18 @@ func _color_for_resource(res: String) -> Color:
 	return Color(1, 1, 1)
 
 
+## Called by NetworkCommands' citizen-state sync on clients to mirror the
+## host's authoritative life_stage/job/cargo without running any AI. Safe to
+## call on the host too (it's a no-op there since the values already match).
+func apply_network_state(p_life_stage: int, p_age: int, p_job: int, p_carried_resource: String, p_carried_amount: int) -> void:
+	life_stage = p_life_stage as LifeStage
+	age = p_age
+	current_job = p_job as Job
+	carried_resource = p_carried_resource
+	carried_amount = p_carried_amount
+	_refresh_appearance()
+
+
 func job_label() -> String:
 	match current_job:
 		Job.FARMER: return "Farmer"
@@ -613,4 +645,4 @@ func life_stage_label() -> String:
 
 
 func is_selectable_by_player() -> bool:
-	return team == 0 and is_alive and life_stage != LifeStage.CHILD
+	return team == _player_team() and is_alive and life_stage != LifeStage.CHILD
