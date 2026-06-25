@@ -13,25 +13,14 @@ extends StaticBody3D
 
 signal destroyed(building)
 
-## ---------------------------------------------------------------------------
-## GLOBAL SIZE. Every building's root is scaled by this on spawn, so models,
-## collision and selection ring all grow together and stay grounded (model
-## bases sit at local y=0, so scaling about the origin keeps them on the floor).
-## Change this ONE number to make every building bigger or smaller.
-## Per-scene exceptions: set `building_scale` in the inspector ( > 0 overrides ).
-## ---------------------------------------------------------------------------
 const GLOBAL_BUILDING_SCALE := 1.75
 
 @export var max_health: int = 400
 @export var build_time: float = 6.0
 @export var team: int = 0
-## When true the building is already finished on spawn (used for the
-## hand-placed starting buildings).
 @export var starts_built: bool = false
-## Per-building size override. -1 = use GLOBAL_BUILDING_SCALE.
 @export var building_scale: float = -1.0
 
-## Tint applied over the model while it is still under construction.
 const BUILD_TINT := Color(0.5, 0.8, 1.0, 0.5)
 
 var health: int
@@ -48,7 +37,6 @@ func _ready() -> void:
 	health = max_health
 	add_to_group("buildings")
 
-	# Apply the global (or per-building) size multiplier to the whole root.
 	var s := building_scale if building_scale > 0.0 else GLOBAL_BUILDING_SCALE
 	scale = Vector3.ONE * s
 
@@ -64,7 +52,6 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
-	# Kept so subclasses can safely call super._process(delta).
 	pass
 
 
@@ -74,6 +61,15 @@ func add_build_progress(amount: float) -> void:
 	build_progress += amount
 	if build_progress >= build_time:
 		finish_building()
+		# NETWORKING: finishing construction flips is_constructed on the
+		# host's copy only. Clients hold their own separate instance of this
+		# building and never otherwise learn it finished — push it now
+		# instead of waiting for the next periodic building-state sync, so
+		# the client's UI/visuals update immediately rather than lagging.
+		if GameManager.is_sim_authority():
+			var net_id: int = get_meta("building_net_id", -1)
+			if net_id != -1:
+				NetworkCommands.server_sync_building_state(net_id)
 
 
 func finish_building() -> void:
@@ -85,20 +81,13 @@ func finish_building() -> void:
 
 
 func _refresh_construction_visual() -> void:
-	# Always show the real model. The old behaviour hid FinishedMesh and showed
-	# ConstructionMesh, but every building scene leaves ConstructionMesh empty,
-	# so freshly-placed buildings were invisible until a citizen finished them.
 	if finished_sprite:
 		finished_sprite.visible = true
-	# Keep any legacy ConstructionMesh hidden — the tint conveys "building".
 	if construction_sprite:
 		construction_sprite.visible = false
 	_apply_build_tint(finished_sprite, not is_constructed)
 
 
-## Recursively overlays (un-constructed) or clears (finished) the build tint on
-## every GeometryInstance3D under the model root. material_overlay is used so we
-## never disturb the model's own materials.
 func _apply_build_tint(root: Node, building: bool) -> void:
 	if root == null:
 		return
@@ -115,9 +104,6 @@ func _apply_build_tint(root: Node, building: bool) -> void:
 		_apply_build_tint(c, building)
 
 
-## Approximate world-space footprint radius: half the larger XZ extent of the
-## CollisionShape3D, multiplied by the applied (uniform) building scale. Used to
-## keep buildings from overlapping each other.
 func footprint_radius() -> float:
 	var col := get_node_or_null("CollisionShape3D")
 	var base := 36.0
@@ -132,9 +118,6 @@ func footprint_radius() -> float:
 	return base * scale.x
 
 
-## World-space half-extents (x, z) of the footprint, from the CollisionShape3D
-## box, multiplied by the applied scale. Used for grid-snapped, touch-allowed
-## overlap tests (so buildings can sit in adjacent cells without "blocking").
 func footprint_extents() -> Vector2:
 	var col := get_node_or_null("CollisionShape3D")
 	var hx := 24.0
@@ -159,14 +142,10 @@ func set_selected(value: bool) -> void:
 		selection_ring.visible = value
 
 
-## True if the LOCAL player owns this building and may select/command it.
-## Without this, every peer could select any building (the host, as team 0,
-## could select and command the client's buildings). Mirrors Unit's gate.
 func is_selectable_by_player() -> bool:
 	return team == _player_team()
 
 
-## This peer's team — 0 in single-player, else the assigned multiplayer team.
 func _player_team() -> int:
 	var nm := get_node_or_null("/root/NetworkManager")
 	if nm == null:
@@ -174,6 +153,7 @@ func _player_team() -> int:
 	if nm and nm.has_method("my_team"):
 		return nm.my_team()
 	return 0
+
 
 func take_damage(amount: int) -> void:
 	health -= amount
@@ -184,3 +164,16 @@ func take_damage(amount: int) -> void:
 func destroy() -> void:
 	destroyed.emit(self)
 	queue_free()
+
+
+## NETWORKING: called on CLIENTS ONLY by NetworkCommands._receive_building_state
+## to mirror the host's authoritative construction/health values. Never call
+## this on the host — its own values are already correct and authoritative.
+func apply_network_state(p_is_constructed: bool, p_build_progress: float, p_health: int) -> void:
+	build_progress = p_build_progress
+	health = p_health
+	if p_is_constructed and not is_constructed:
+		finish_building()
+	elif not p_is_constructed:
+		is_constructed = false
+		_refresh_construction_visual()

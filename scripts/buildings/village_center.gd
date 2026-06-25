@@ -4,6 +4,10 @@ extends Building
 ## The starting hub: drop-off point for all gathered resources (citizens path
 ## here automatically) and where new citizens are recruited. Always starts
 ## already-built so a fresh game has somewhere to deliver to immediately.
+##
+## CLIENT STATE: recruit_elapsed/recruit_queue/is_recruiting only ever advance
+## on the host's copy (see _process below) — see Barracks for the identical
+## issue and why apply_network_state_extra exists.
 
 @export var spawn_offset: Vector3 = Vector3(0, 0, 86)
 @export var recruit_time: float = 5.0
@@ -26,6 +30,9 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	super._process(delta)
+
+	if not GameManager.is_sim_authority():
+		return
 
 	if not is_recruiting or recruit_queue.is_empty():
 		return
@@ -71,10 +78,6 @@ func _start_next_recruit() -> void:
 
 
 func _complete_recruit() -> void:
-	# Recruiting mutates shared state, so only the authority spawns. The unit
-	# MUST go through server_spawn_unit so it gets a unit_id and is replicated
-	# to every peer — instantiating locally makes it invisible to clients and
-	# uncommandable (no unit_id for the order filter to reference).
 	if not GameManager.is_sim_authority():
 		return
 	var spawn_pos := global_position + spawn_offset \
@@ -87,3 +90,16 @@ func _complete_recruit() -> void:
 	if citizen.has_method("setup_as_adult"):
 		citizen.setup_as_adult()
 	GameManager.register_population(citizen)
+
+
+## NETWORKING: client-only mirror of the host's recruit queue/progress.
+func apply_network_state_extra(p_recruit_queue: Array, p_recruit_elapsed: float, p_is_recruiting: bool) -> void:
+	recruit_queue = p_recruit_queue.duplicate(true)
+	recruit_elapsed = p_recruit_elapsed
+	is_recruiting = p_is_recruiting
+	if recruit_bar:
+		if is_recruiting and not recruit_queue.is_empty():
+			recruit_bar.visible = true
+			recruit_bar.value = clampf(recruit_elapsed / recruit_queue[0]["duration"] * 100.0, 0.0, 100.0)
+		else:
+			recruit_bar.visible = false

@@ -2,6 +2,12 @@ extends Node
 ## NetworkManager — autoload singleton (add to Project > Autoload as "NetworkManager").
 ## Handles peer creation, lobby state, and player registry.
 ## The host (peer 1) is always the authority for all simulation.
+##
+## FIXED: added client_set_ready RPC here so it lives on this persistent
+## autoload node rather than on the transient Lobby Control node. The old
+## lobby.gd defined _set_self_ready as an @rpc on itself — after start_game()
+## changed the scene that node was freed, and any in-flight RPC targeting it
+## produced "Invalid packet received. Requested node was not found."
 
 const PORT        := 7777
 const MAX_PEERS   := 4
@@ -105,6 +111,19 @@ func _register_player(player_name: String) -> void:
 func _sync_player_list(player_dict: Dictionary) -> void:
 	players = player_dict
 	lobby_updated.emit()
+
+
+## FIX: moved from lobby.gd to here so it targets this persistent autoload.
+## lobby.gd now calls NetworkManager.client_set_ready.rpc_id(1, true) instead
+## of _set_self_ready.rpc_id(1, true) on itself.
+@rpc("any_peer", "reliable")
+func client_set_ready(value: bool) -> void:
+	if not multiplayer.is_server():
+		return
+	var pid := multiplayer.get_remote_sender_id()
+	if players.has(pid):
+		players[pid]["ready"] = value
+		_sync_player_list.rpc(players)
 
 
 ## Host calls this once everyone is ready — clients load the game scene.

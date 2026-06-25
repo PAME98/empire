@@ -272,17 +272,34 @@ func _refresh_selected_building_info() -> void:
 
 func _on_recruit_citizen_pressed() -> void:
 	if GameManager.selected_building is VillageCenter:
-		GameManager.selected_building.queue_citizen()
+		_request_train(GameManager.selected_building, "citizen")
 
 
 func _on_train_soldier_pressed() -> void:
 	if GameManager.selected_building is Barracks:
-		GameManager.selected_building.queue_soldier()
+		_request_train(GameManager.selected_building, "soldier")
 
 
 func _on_train_artillery_pressed() -> void:
 	if GameManager.selected_building is Barracks:
-		GameManager.selected_building.queue_artillery()
+		_request_train(GameManager.selected_building, "artillery")
+
+
+## Routes training requests through NetworkCommands so they're host-
+## authoritative, same pattern as movement/attack/gather/build orders.
+## Calling queue_soldier()/queue_artillery()/queue_citizen() directly here
+## (the old code) mutated only the CALLING peer's local copy of the building —
+## harmless-looking on the host (who IS the authority), but on a client it
+## silently edited dead state nobody simulates, so the queue/progress bar
+## never advanced and no unit was ever actually trained.
+func _request_train(building: Node, unit_type: String) -> void:
+	var net_id: int = building.get_meta("building_net_id", -1)
+	if net_id == -1:
+		return
+	if multiplayer.is_server() or not multiplayer.has_multiplayer_peer():
+		NetworkCommands.request_train_unit(net_id, unit_type)
+	else:
+		NetworkCommands.request_train_unit.rpc_id(1, net_id, unit_type)
 
 
 # ---------------------------------------------------------------------------

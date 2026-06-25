@@ -18,21 +18,24 @@ extends Node
 ## and NetworkManager via the tree by their well-known autoload paths breaks
 ## the cycle at parse time and works in any order. Untyped on purpose so all
 ## member access stays dynamic (no static type to check members against).
+##
+## IMPORTANT: these paths must match the Autoload NODE NAME (Project Settings
+## -> Autoload, left column), NOT the underlying .gd filename. This project's
+## autoloads are registered as "GameManager" / "NetworkManager" (capitalized)
+## even though the files on disk are game_manager.gd / network_manager.gd —
+## looking up "/root/game_manager" (lowercase) finds nothing and _gm()/_nm()
+## silently return null, crashing the first thing that calls a method on them.
 var _game_manager = null
 var _network_manager = null
 
 func _gm():
 	if not is_instance_valid(_game_manager):
-		_game_manager = get_node_or_null("/root/game_manager")
-		if not is_instance_valid(_game_manager):
-			_game_manager = get_node_or_null("/root/GameManager")
+		_game_manager = get_node_or_null("/root/GameManager")
 	return _game_manager
 
 func _nm():
 	if not is_instance_valid(_network_manager):
-		_network_manager = get_node_or_null("/root/network_manager")
-		if not is_instance_valid(_network_manager):
-			_network_manager = get_node_or_null("/root/NetworkManager")
+		_network_manager = get_node_or_null("/root/NetworkManager")
 	return _network_manager
 
 
@@ -237,16 +240,10 @@ func _spawn_building_on_all(building_id: String, pos: Vector3, team: int, net_id
 		return
 	var building: Node3D = load(scene_path).instantiate()
 	building.team = team
-	# Stable cross-machine id so build/demolish/train commands can reference
-	# this exact building on every peer. NodePaths differ per machine (child
-	# order under Buildings isn't guaranteed identical), which is why path-based
-	# build orders silently missed. The host allocates net_id and passes it in
-	# this RPC's args, so host and client tag the same building identically.
 	building.set_meta("building_net_id", net_id)
 	var scene := get_tree().current_scene
 	scene.get_node("Buildings").add_child(building)
 	building.global_position = pos
-	# Rebake nav on host only
 	if multiplayer.is_server():
 		var map_gen := scene.get_node_or_null("MapGenerator")
 		if map_gen and map_gen.has_method("rebake_navigation"):
@@ -310,6 +307,22 @@ func request_demolish(building_ref) -> void:
 	if building == null or building.team != sender_team:
 		return
 	building.destroy()
+
+
+# ---------------------------------------------------------------------------
+# RETURN TO WORK / DELIVER  (right-click own Village Center)
+# ---------------------------------------------------------------------------
+@rpc("any_peer", "reliable")
+func request_return_to_work(unit_ids: Array) -> void:
+	if not multiplayer.is_server():
+		return
+	var sender_team: int = _caller_team()
+	for uid in unit_ids:
+		var unit := _find_unit(uid)
+		if unit == null or unit.team != sender_team:
+			continue
+		if unit.has_method("command_return_to_work"):
+			unit.command_return_to_work()
 
 
 # ---------------------------------------------------------------------------
@@ -499,6 +512,101 @@ func _receive_citizen_states(data: Array) -> void:
 
 
 # ---------------------------------------------------------------------------
+# BUILDING STATE SYNC  (host -> clients)
+## Generic construction/health sync (every Building) PLUS an optional "extra"
+## payload for building types that have their own host-only ticking state
+## clients otherwise never see update: Barracks (train_queue/train_elapsed/
+## is_training) and VillageCenter (recruit_queue/recruit_elapsed/
+## is_recruiting). Both only ever progress inside _process, which is gated
+## by GameManager.is_sim_authority() — a client's local copy never runs that
+## branch, so without this push its queue/progress bar is frozen forever
+## (typically showing 0%, since the client never locally calls
+## queue_soldier()/queue_citizen() either — those are host-only, invoked via
+## request_train_unit).
+# ---------------------------------------------------------------------------
+func _building_extra_state(b: Node) -> Dictionary:
+	if b is Barracks:
+		return {
+			"kind": "barracks",
+			"train_queue": b.train_queue,
+			"train_elapsed": b.train_elapsed,
+			"is_training": b.is_training,
+		}
+	if b is VillageCenter:
+		return {
+			"kind": "village_center",
+			"recruit_queue": b.recruit_queue,
+			"recruit_elapsed": b.recruit_elapsed,
+			"is_recruiting": b.is_recruiting,
+		}
+	return {}
+
+
+func _apply_extra_state(b: Node, extra: Dictionary) -> void:
+	if extra.is_empty():
+		return
+	match extra.get("kind", ""):
+		"barracks":
+			if b.has_method("apply_network_state_extra"):
+				b.apply_network_state_extra(extra["train_queue"], extra["train_elapsed"], extra["is_training"])
+		"village_center":
+			if b.has_method("apply_network_state_extra"):
+				b.apply_network_state_extra(extra["recruit_queue"], extra["recruit_elapsed"], extra["is_recruiting"])
+
+
+func server_sync_all_building_states() -> void:
+	if not multiplayer.is_server():
+		return
+	var data: Array = []
+	for b in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(b):
+			continue
+		var net_id: int = b.get_meta("building_net_id", -1)
+		if net_id == -1:
+			continue
+		data.append({
+			"id": net_id,
+			"is_constructed": b.is_constructed,
+			"build_progress": b.build_progress,
+			"health": b.health,
+			"extra": _building_extra_state(b),
+		})
+	if data.is_empty():
+		return
+	_receive_building_states.rpc(data)
+
+
+## One-shot push for a single building (e.g. right when it finishes), so the
+## client doesn't have to wait for the next periodic broadcast to see it.
+func server_sync_building_state(net_id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var b := _find_building(net_id)
+	if b == null:
+		return
+	var data := [{
+		"id": net_id,
+		"is_constructed": b.is_constructed,
+		"build_progress": b.build_progress,
+		"health": b.health,
+		"extra": _building_extra_state(b),
+	}]
+	_receive_building_states.rpc(data)
+
+
+@rpc("authority", "unreliable")
+func _receive_building_states(data: Array) -> void:
+	if multiplayer.is_server():
+		return
+	for entry in data:
+		var b := _find_building(entry["id"])
+		if b == null or not b.has_method("apply_network_state"):
+			continue
+		b.apply_network_state(entry["is_constructed"], entry["build_progress"], entry["health"])
+		_apply_extra_state(b, entry.get("extra", {}))
+
+
+# ---------------------------------------------------------------------------
 # RESOURCE SYNC  (host -> owning client only)
 # ---------------------------------------------------------------------------
 func server_sync_resources(team: int) -> void:
@@ -507,8 +615,8 @@ func server_sync_resources(team: int) -> void:
 	var peer_id: int = _nm().peer_for_team(team)
 	if peer_id == -1:
 		return
-	var res :Variant = _gm().team_resources.get(team, {})
-	var pop :Variant = _gm().team_population.get(team, {})
+	var res: Variant = _gm().team_resources.get(team, {})
+	var pop: Variant = _gm().team_population.get(team, {})
 	if peer_id == 1:
 		# Host updates its own UI directly
 		_gm().resources_changed.emit(

@@ -47,17 +47,11 @@ func _res(key: String) -> int:
 func _pop(key: String) -> int:
 	return team_population.get(_my_team(), {}).get(key, 0)
 
+## IMPORTANT: this must match the Autoload NODE NAME (Project Settings ->
+## Autoload, left column), not the .gd filename. This project registers it as
+## "NetworkManager" (capitalized) even though the file is network_manager.gd.
 func _my_team() -> int:
-	# NetworkManager is an autoload (a regular scene-tree node), not an Engine
-	# singleton — Engine.has_singleton() never finds it, and worse, it makes
-	# the parser choke on the bare "NetworkManager" identifier in some load
-	# orders ("Identifier not declared in the current scope"). Looking it up
-	# via the tree by its well-known autoload path avoids both problems and
-	# degrades cleanly to team 0 in single-player, before NetworkManager (or
-	# any autoload) is even relevant.
-	var nm := get_node_or_null("/root/network_manager")
-	if not is_instance_valid(nm):
-		nm = get_node_or_null("/root/NetworkManager")
+	var nm := get_node_or_null("/root/NetworkManager")
 	if nm:
 		return nm.my_team()
 	return 0
@@ -78,9 +72,7 @@ var _net_commands = null
 
 func _nc():
 	if not is_instance_valid(_net_commands):
-		_net_commands = get_node_or_null("/root/network_commands")
-		if not is_instance_valid(_net_commands):
-			_net_commands = get_node_or_null("/root/NetworkCommands")
+		_net_commands = get_node_or_null("/root/NetworkCommands")
 	return _net_commands
 
 # ---------------------------------------------------------------------------
@@ -216,7 +208,7 @@ func _yearly_tick() -> void:
 		if res["food"] >= pop:
 			res["food"] -= pop
 		else:
-			var deficit :Variant = pop - res["food"]
+			var deficit: Variant = pop - res["food"]
 			res["food"] = 0
 			_starve(deficit, team)
 		_nc().server_sync_resources(team)
@@ -239,9 +231,9 @@ func _starve(deficit: int, team: int) -> void:
 
 func _check_births() -> void:
 	for team in team_population.keys():
-		var pop  :Variant = team_population[team]
-		var free :Variant = pop["housing_capacity"] - pop["population"]
-		var res  :Variant = team_resources[team]
+		var pop: Variant = team_population[team]
+		var free: Variant = pop["housing_capacity"] - pop["population"]
+		var res: Variant = team_resources[team]
 		if free <= 0 or res["food"] < 30:
 			continue
 		var pairs  := int(adult_count / 2.0)
@@ -257,7 +249,7 @@ func _spawn_child(team: int) -> void:
 	if houses.is_empty():
 		return
 	var house: Node = houses.pick_random()
-	var pos   :Variant = house.global_position + Vector3(
+	var pos: Variant = house.global_position + Vector3(
 		randf_range(-24, 24), 0, randf_range(-24, 24)
 	)
 	var child: Node3D = _nc().server_spawn_unit(
@@ -279,7 +271,7 @@ func _spawn_child(team: int) -> void:
 # Resource helpers — PER TEAM
 # ---------------------------------------------------------------------------
 func can_afford_for_team(cost: Dictionary, team: int) -> bool:
-	var res :Variant = team_resources.get(team, {})
+	var res: Variant = team_resources.get(team, {})
 	for k in cost:
 		if res.get(k, 0) < cost[k]:
 			return false
@@ -289,7 +281,7 @@ func can_afford_for_team(cost: Dictionary, team: int) -> bool:
 func spend_for_team(cost: Dictionary, team: int) -> void:
 	if not is_sim_authority():
 		return
-	var res :Variant = team_resources[team]
+	var res: Variant = team_resources[team]
 	for k in cost:
 		res[k] = maxi(0, res.get(k, 0) - cost[k])
 	_nc().server_sync_resources(team)
@@ -299,7 +291,7 @@ func spend_for_team(cost: Dictionary, team: int) -> void:
 func add_resources_for_team(team: int, amounts: Dictionary) -> void:
 	if not is_sim_authority():
 		return
-	var res :Variant = team_resources.get(team, {})
+	var res: Variant = team_resources.get(team, {})
 	for k in amounts:
 		res[k] = res.get(k, 0) + amounts[k]
 	_nc().server_sync_resources(team)
@@ -320,8 +312,8 @@ func add_resources(f:int=0,w:int=0,s:int=0,g:int=0,i:int=0,wa:int=0) -> void:
 
 func update_ui() -> void:
 	var team := _my_team()
-	var res  :Variant= team_resources.get(team, {})
-	var pop  :Variant= team_population.get(team, {})
+	var res: Variant = team_resources.get(team, {})
+	var pop: Variant = team_population.get(team, {})
 	resources_changed.emit(
 		res.get("food",0), res.get("wood",0), res.get("stone",0),
 		res.get("gold",0), res.get("iron",0), res.get("water",0),
@@ -341,7 +333,7 @@ func consume_inputs(inputs: Dictionary) -> void:
 func register_population(citizen) -> void:
 	if not is_sim_authority():
 		return
-	var team :Variant= citizen.team if "team" in citizen else 0
+	var team: Variant = citizen.team if "team" in citizen else 0
 	team_population.get(team, {})["population"] = \
 		team_population.get(team, {}).get("population", 0) + 1
 	all_citizens.append(citizen)
@@ -353,7 +345,7 @@ func register_population(citizen) -> void:
 func register_soldier(soldier) -> void:
 	if not is_sim_authority():
 		return
-	var team :Variant = soldier.team if "team" in soldier else 0
+	var team: Variant = soldier.team if "team" in soldier else 0
 	team_population.get(team, {})["population"] = \
 		team_population.get(team, {}).get("population", 0) + 1
 	all_soldiers.append(soldier)
@@ -364,7 +356,7 @@ func register_soldier(soldier) -> void:
 func register_artillery(art) -> void:
 	if not is_sim_authority():
 		return
-	var team :Variant = art.team if "team" in art else 0
+	var team: Variant = art.team if "team" in art else 0
 	team_population.get(team, {})["population"] = \
 		team_population.get(team, {}).get("population", 0) + 1
 	all_artillery.append(art)
@@ -375,8 +367,8 @@ func register_artillery(art) -> void:
 func remove_population(unit, cause: String = "") -> void:
 	if not is_sim_authority():
 		return
-	var team :Variant = unit.team if "team" in unit else 0
-	var pop  :Variant = team_population.get(team, {})
+	var team: Variant = unit.team if "team" in unit else 0
+	var pop: Variant = team_population.get(team, {})
 	pop["population"] = maxi(0, pop.get("population", 0) - 1)
 
 	if unit in all_citizens:
@@ -396,18 +388,27 @@ func remove_population(unit, cause: String = "") -> void:
 
 
 ## Housing capacity changes a shared per-team pool exactly like spending
-## resources does — it MUST only ever be applied once, by the host. Without
-## this guard, a client running Building/Citizen construction logic locally
-## (e.g. before all client-side AI gating is in place, or for any future
-## building type someone forgets to gate) would double-apply this.
-func change_housing(delta: int) -> void:
+## resources does — it MUST only ever be applied once, by the host, AND it
+## must be attributed to the OWNING team, not whichever peer happens to be
+## executing the code. The old change_housing(delta) used _my_team(), which
+## always resolves to the HOST's team since House.finish_building() only
+## ever actually runs to completion on the host (the only peer that runs
+## Citizen build-progress simulation) — so every client-built house's
+## capacity was silently being credited to the host instead of the client.
+func change_housing_for_team(team: int, delta: int) -> void:
 	if not is_sim_authority():
 		return
-	var team := _my_team()
-	var pop  :Variant = team_population.get(team, {})
+	var pop: Variant = team_population.get(team, {})
 	pop["housing_capacity"] = pop.get("housing_capacity", 0) + delta
 	_nc().server_sync_resources(team)
 	update_ui()
+
+
+## Kept for any other existing call sites — forwards to the team-aware
+## version using _my_team(), preserving old behaviour for anything that
+## genuinely wants "my own" team rather than an explicit one.
+func change_housing(delta: int) -> void:
+	change_housing_for_team(_my_team(), delta)
 
 
 # ---------------------------------------------------------------------------

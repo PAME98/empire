@@ -16,11 +16,14 @@ func finish_building() -> void:
 	super.finish_building()
 	if is_constructed and not was_constructed and not _registered:
 		_registered = true
-		GameManager.change_housing(capacity)
+		# Use this house's OWN team, not whichever peer happens to be running
+		# this code (always the host — see GameManager.change_housing_for_team
+		# for why that distinction matters).
+		GameManager.change_housing_for_team(team, capacity)
 
 
 func destroy() -> void:
 	if _registered:
-		GameManager.change_housing(-capacity)
+		GameManager.change_housing_for_team(team, -capacity)
 		_registered = false
 	super.destroy()
