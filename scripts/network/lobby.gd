@@ -15,13 +15,8 @@ extends Control
 @onready var ready_button:    Button       = $VBoxContainer/ReadyButton
 @onready var leave_button:    Button       = $VBoxContainer/LeaveButton
 
-const MAP_SIZES := [
-	Vector2(1280,  720),
-	Vector2(2560, 1440),
-	Vector2(4096, 2304),
-	Vector2(6144, 3456),
-]
-const MAP_LABELS := ["Small", "Medium", "Large", "Huge"]
+const MAP_SIZES  := MapSettings.SIZE_PRESETS
+const MAP_LABELS := MapSettings.SIZE_LABELS
 
 const HOST_PEER_ID := 1
 

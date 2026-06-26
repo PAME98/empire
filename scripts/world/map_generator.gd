@@ -57,10 +57,10 @@ const CONTINENT_OCTAVES      := 5
 ## ISLAND_THRESHOLD for fewer/rarer islands; raise ISLAND_RAISE to make them
 ## bigger. (Islands are separated by ocean, so land units can't walk to them —
 ## they're map variety / future-boat fodder.)
-const ISLAND_SPAN            := 10.0
-const ISLAND_OCTAVES         := 3
-const ISLAND_THRESHOLD       := 0.62
-const ISLAND_RAISE           := 0.08
+const ISLAND_SPAN            := 16.0   # was 10.0 — more, smaller islands
+const ISLAND_OCTAVES         := 4      # was 3 — more detail/variety in shape
+const ISLAND_THRESHOLD       := 0.55   # was 0.62 — lower = islands appear more often
+const ISLAND_RAISE           := 0.12   # was 0.08 — islands sit a bit higher above sea, making them larger
 ## Land where land_value > SEA_LEVEL. Raise => more ocean / smaller land.
 ## 0.47 keeps continents large while leaving open sea for islands to sit in.
 const SEA_LEVEL              := 0.47

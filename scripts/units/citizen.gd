@@ -1,23 +1,23 @@
 class_name Citizen
 extends Unit
 
-## The Kingdom-Reborn-style economy unit. Citizens are born at houses, age
-## from child -> adult -> elder -> death, and — when not given a direct
-## player order — autonomously look for work at resource buildings and feed
-## that work back into GameManager's stockpiles.
+## Economy unit. Citizens gather resources, construct buildings, and deliver
+## goods to the village center.
 ##
-## Crucially, a Citizen is ALSO a first-class RTS unit: box-select it, drag
-## it, right-click a tree/farm/quarry/build-site to give it a direct order.
-## Player orders always take priority over the autonomous AI; the AI only
-## drives a citizen when nobody has told it what to do.
-##
-## NETWORKING: everything in this file is simulation state (job assignment,
-## harvesting, delivery, building progress) — it must only ever run on the
-## peer with simulation authority (single-player, or the host in a networked
-## game). _process is gated accordingly. Clients still get _refresh_appearance
-## calls (driven by life_stage/current_job/carried_resource, which arrive via
-## NetworkCommands' citizen-state sync) so they SEE the right model/colour,
-## they just never decide it themselves.
+## KEY AI IMPROVEMENTS over the previous version:
+##   - Workers use their Unit.arrival_offset to spread around a workplace so
+##     they don't all stand on the exact same point.
+##   - move_to() for work targets passes workplace.global_position + arrival_offset
+##     so each citizen has a unique personal spot to walk to.
+##   - Gather timers are staggered on spawn (random phase) so a group of freshly
+##     assigned workers don't all try to harvest simultaneously.
+##   - Re-pathing is throttled: we only call move_to() again after a minimum
+##     interval rather than every _process frame, which was resetting the nav
+##     path and disrupting avoidance every tick.
+##   - Delivery targets use arrival_offset too so citizens don't queue in a
+##     single-file column into the village center.
+##   - Job-search cooldown is randomised slightly so multiple idle citizens
+##     don't all pick the same building in the same frame.
 
 enum LifeStage { CHILD, ADULT, ELDER }
 enum Job { NONE, FARMER, WOODCUTTER, MINER, BUILDER, TRADER, WATERCARRIER }
@@ -26,13 +26,11 @@ const CHILD_TO_ADULT_AGE := 14
 const ADULT_TO_ELDER_AGE := 50
 const MAX_AGE := 75
 const ELDER_DEATH_CHANCE := 0.06
-
-## When a hand-ordered gatherer empties a tree (or rock), it auto-moves to the
-## nearest remaining node of the same resource within this range and keeps
-## working — so you right-click a forest ONCE instead of every tree. Beyond this
-## range it goes idle (so a lone worker won't trek across a huge map). 0 = no
-## limit. Tune to roughly "one forest's worth" in your world's scale.
 const GATHER_CONTINUE_RANGE := 1600.0
+
+## Minimum seconds between re-issuing a move_to() while already travelling to
+## the same target. Prevents resetting the nav path (and avoidance) every tick.
+const REPATH_INTERVAL: float = 0.6
 
 @export var carry_capacity: int = 8
 @export var gather_interval: float = 1.2
@@ -55,34 +53,57 @@ var _gather_timer: float = 0.0
 var _job_search_cooldown: float = 0.0
 var _resume_workplace_after_delivery = null
 
+## Throttle re-pathing so we don't call move_to() every frame.
+var _repath_timer: float = 0.0
+## The last target we issued a move_to() for, to detect when destination changes.
+var _last_move_target: Vector3 = Vector3(INF, INF, INF)
+
 @onready var sprite: Node = get_node_or_null("Mesh")
 @onready var job_icon: Node = get_node_or_null("JobIcon")
 @onready var carry_icon: Node = get_node_or_null("CarryIcon")
 
-const INTERACTION_MARGIN: float = 14.0
-const OWN_RADIUS: float = 12.0
+
+## Returns the position this citizen should walk to when working at `target`.
+## Adds the citizen's personal arrival_offset so workers spread around a building.
+func _work_pos(target: Node) -> Vector3:
+	if target == null:
+		return Vector3.ZERO
+	return target.global_position + arrival_offset
 
 
-func _interaction_range(target: Node) -> float:
-	var target_half_size: float = 16.0
-	var shape_node = target.get_node_or_null("CollisionShape3D")
-	if shape_node and shape_node.shape:
-		var sh = shape_node.shape
-		if sh is BoxShape3D:
-			target_half_size = Vector2(sh.size.x, sh.size.z).length() * 0.5
-		elif sh is CylinderShape3D:
-			target_half_size = sh.radius
-		elif sh is SphereShape3D:
-			target_half_size = sh.radius
-		elif sh is CapsuleShape3D:
-			target_half_size = sh.radius
-	return target_half_size + OWN_RADIUS + INTERACTION_MARGIN
+## Returns the position this citizen should walk to when delivering to `target`.
+## Uses a smaller offset so citizens don't walk too far past the center.
+func _delivery_pos(target: Node) -> Vector3:
+	if target == null:
+		return Vector3.ZERO
+	# Use a quieter offset for delivery — we just need to be close enough to
+	# hand over resources, not stand at a specific workstation.
+	var small_offset := Vector3(arrival_offset.x * 0.4, 0.0, arrival_offset.z * 0.4)
+	return target.global_position + small_offset
+
+
+## Issue a move_to() only when the target position has changed meaningfully
+## OR the repath timer has expired. This prevents resetting the nav agent
+## (and its avoidance computation) every single frame.
+func _move_toward(pos: Vector3) -> void:
+	_repath_timer -= get_process_delta_time()
+	var changed := pos.distance_to(_last_move_target) > 12.0
+	if changed or _repath_timer <= 0.0:
+		_last_move_target = pos
+		_repath_timer = REPATH_INTERVAL
+		move_to(pos)
 
 
 func _ready() -> void:
 	super._ready()
 	add_to_group("citizens")
 	speed = 85.0
+	# Stagger gather timers so a freshly-grouped set of workers don't all
+	# try to harvest in the same frame, causing a spike of simultaneous activity.
+	_gather_timer = randf_range(0.0, gather_interval)
+	# Stagger job-search so citizens assigned together don't all pick the same
+	# workplace in the same frame.
+	_job_search_cooldown = randf_range(0.0, 1.5)
 	_refresh_appearance()
 	if life_stage == LifeStage.ADULT and _has_movement_authority():
 		_try_autofind_job()
@@ -163,17 +184,18 @@ func _run_auto_job(delta: float) -> void:
 		Job.FARMER, Job.MINER, Job.WOODCUTTER:
 			_auto_work_job(delta)
 		Job.BUILDER:
-			# Clear stale or finished construction targets.
 			if not is_instance_valid(order_target) \
 					or (order_target.has_method("is_constructed") and order_target.is_constructed):
 				order_target = null
-				current_job  = Job.NONE
+				current_job = Job.NONE
 			else:
 				_auto_build(delta)
 		Job.NONE:
 			_job_search_cooldown -= delta
 			if _job_search_cooldown <= 0.0:
-				_job_search_cooldown = 2.0
+				# Randomise the next search slightly so batches of idle citizens
+				# don't all converge on the same building simultaneously.
+				_job_search_cooldown = randf_range(1.8, 2.8)
 				_try_autofind_job()
 
 
@@ -181,15 +203,9 @@ func _try_autofind_job() -> bool:
 	if life_stage != LifeStage.ADULT:
 		return false
 
-	# Construction sites first — an unbuilt building on our team is urgent.
 	if _autofind_construction():
 		return true
 
-	# Then resource producers, in priority order. Within each resource tier,
-	# pick the NEAREST site that's on our team and has a free worker slot.
-	# Previously this claimed the first site in group-iteration order, which is
-	# effectively arbitrary and differs between the editor and an exported
-	# build — that's why citizens walked across the map to a far lumber camp.
 	var candidates = [
 		{"group": "farms",        "job": Job.FARMER},
 		{"group": "lumber_camps", "job": Job.WOODCUTTER},
@@ -206,8 +222,6 @@ func _try_autofind_job() -> bool:
 				continue
 			if not site.has_method("assign_worker"):
 				continue
-			# Check there's room WITHOUT claiming the slot yet, so a closer but
-			# full site doesn't make us skip a slightly farther open one.
 			if site.has_method("worker_count") and "max_workers" in site \
 					and site.worker_count() >= site.max_workers:
 				continue
@@ -223,7 +237,6 @@ func _try_autofind_job() -> bool:
 
 
 func _autofind_construction() -> bool:
-	## Find the nearest unfinished building on our team and go build it.
 	var best      = null
 	var best_dist := INF
 	for site in get_tree().get_nodes_in_group("construction_sites"):
@@ -253,8 +266,12 @@ func _auto_work_job(delta: float) -> void:
 		workplace = null
 		return
 
-	if global_position.distance_to(workplace.global_position) > _interaction_range(workplace) and not has_stalled_near_target():
-		move_to(workplace.global_position)
+	var wp_pos := _work_pos(workplace)
+	var dist   := global_position.distance_to(wp_pos)
+	var range  := interaction_range_for(workplace)
+
+	if dist > range and not has_stalled_near_target():
+		_move_toward(wp_pos)
 		return
 
 	stop()
@@ -263,15 +280,12 @@ func _auto_work_job(delta: float) -> void:
 		return
 	_gather_timer = 0.0
 
-	var resource_type = _carried_type_for(workplace)
-	var got = workplace.harvest(carry_capacity - carried_amount)
+	var resource_type := _carried_type_for(workplace)
+	var got :Variant = workplace.harvest(carry_capacity - carried_amount)
 	if got > 0:
 		carried_amount += got
 		carried_resource = resource_type
 	elif carried_amount == 0:
-		# Node exhausted, hands empty. If this is a hand-issued gather order,
-		# keep harvesting the local forest/field by hopping to the nearest
-		# remaining node of the same resource; only idle if none is in range.
 		var dead = workplace
 		_leave_workplace()
 		if _gather_continue_to_nearest(dead):
@@ -292,9 +306,9 @@ func _auto_work_job(delta: float) -> void:
 
 func _resource_for_job(job: Job) -> String:
 	match job:
-		Job.FARMER: return "food"
-		Job.WOODCUTTER: return "wood"
-		Job.MINER: return "stone"
+		Job.FARMER:       return "food"
+		Job.WOODCUTTER:   return "wood"
+		Job.MINER:        return "stone"
 		Job.WATERCARRIER: return "water"
 	return ""
 
@@ -316,14 +330,16 @@ func _auto_build(_delta: float) -> void:
 			return
 		site = sites[0]
 
-	if global_position.distance_to(site.global_position) > _interaction_range(site) and not has_stalled_near_target():
-		move_to(site.global_position)
+	var wp_pos := _work_pos(site)
+	var dist   := global_position.distance_to(wp_pos)
+	if dist > interaction_range_for(site) and not has_stalled_near_target():
+		_move_toward(wp_pos)
 		return
 
 	stop()
 	site.add_build_progress(build_rate * get_process_delta_time())
 	if site.is_constructed:
-		current_job = Job.NONE
+		current_job  = Job.NONE
 		order_target = null
 
 
@@ -354,7 +370,7 @@ func command_gather(resource_node) -> void:
 	order_target = resource_node
 	workplace = resource_node
 	current_job = job
-	_gather_timer = 0.0
+	_gather_timer = randf_range(0.0, gather_interval * 0.5)  # stagger on new assignment
 
 
 func _job_for_target(node) -> Job:
@@ -365,12 +381,9 @@ func _job_for_target(node) -> Job:
 			"food": return Job.FARMER
 			"water": return Job.WATERCARRIER
 		return Job.NONE
-	if node.is_in_group("farms"):
-		return Job.FARMER
-	if node.is_in_group("lumber_camps"):
-		return Job.WOODCUTTER
-	if node.is_in_group("quarries") or node.is_in_group("mines"):
-		return Job.MINER
+	if node.is_in_group("farms"):       return Job.FARMER
+	if node.is_in_group("lumber_camps"): return Job.WOODCUTTER
+	if node.is_in_group("quarries") or node.is_in_group("mines"): return Job.MINER
 	return Job.NONE
 
 
@@ -390,6 +403,7 @@ func command_move(pos: Vector3) -> void:
 	order_kind = "move"
 	order_target = null
 	current_job = Job.NONE
+	_last_move_target = Vector3(INF, INF, INF)  # force fresh path
 	move_to(pos)
 
 
@@ -412,7 +426,7 @@ func command_return_to_work() -> void:
 			and previous_workplace.assign_worker(self):
 		workplace = previous_workplace
 		current_job = _job_for_target(previous_workplace)
-		_gather_timer = 0.0
+		_gather_timer = randf_range(0.0, gather_interval * 0.5)
 	else:
 		_try_autofind_job()
 
@@ -448,19 +462,13 @@ func _run_player_order(delta: float) -> void:
 
 func _player_build(_delta: float) -> void:
 	var site = order_target
-	if global_position.distance_to(site.global_position) > _interaction_range(site) and not has_stalled_near_target():
-		move_to(site.global_position)
+	var wp_pos := _work_pos(site)
+	if global_position.distance_to(wp_pos) > interaction_range_for(site) \
+			and not has_stalled_near_target():
+		_move_toward(wp_pos)
 		return
 	stop()
-	var dt := get_process_delta_time()
-	print("[BUILD DEBUG] citizen_uid=", get_meta("unit_id", -1),
-		" my_team=", team,
-		" site=", site.name,
-		" site_team=", (site.team if "team" in site else "?"),
-		" is_constructed=", site.is_constructed,
-		" progress=", site.build_progress, "/", site.build_time,
-		" dt=", dt, " rate=", build_rate)
-	site.add_build_progress(build_rate * dt)
+	site.add_build_progress(build_rate * get_process_delta_time())
 	if site.is_constructed:
 		stop_special_orders()
 		current_job = Job.NONE
@@ -473,8 +481,10 @@ func _continue_delivery() -> void:
 	var center = _nearest_in_group("village_centers")
 	if center == null:
 		return
-	if global_position.distance_to(center.global_position) > _interaction_range(center) and not has_stalled_near_target():
-		move_to(center.global_position)
+	var dp    := _delivery_pos(center)
+	var range := interaction_range_for(center)
+	if global_position.distance_to(dp) > range and not has_stalled_near_target():
+		_move_toward(dp)
 		return
 	stop()
 	if carried_amount > 0 and carried_resource != "":
@@ -482,6 +492,8 @@ func _continue_delivery() -> void:
 	carried_amount = 0
 	carried_resource = ""
 	is_delivering = false
+	# Reset move state so next work leg gets a fresh path.
+	_last_move_target = Vector3(INF, INF, INF)
 
 	if _resume_workplace_after_delivery != null:
 		var prev = _resume_workplace_after_delivery
@@ -489,30 +501,24 @@ func _continue_delivery() -> void:
 		if is_instance_valid(prev) and prev.has_method("assign_worker") and prev.assign_worker(self):
 			workplace = prev
 			current_job = _job_for_target(prev)
-			_gather_timer = 0.0
+			_gather_timer = randf_range(0.0, gather_interval * 0.5)
 		else:
 			_try_autofind_job()
 		return
 
 	if has_player_order and order_kind == "gather" and workplace == null:
 		var site = order_target
-		# Resume the original node if it still has resource and a free slot...
 		if is_instance_valid(site) and ("amount" not in site or site.amount > 0) \
 				and site.has_method("assign_worker") and site.assign_worker(self):
 			workplace = site
 			current_job = _job_for_target(site)
-			_gather_timer = 0.0
+			_gather_timer = randf_range(0.0, gather_interval * 0.5)
 			return
-		# ...otherwise keep harvesting: hop to the nearest equivalent node.
 		if _gather_continue_to_nearest(site):
 			return
 		stop_special_orders()
 
 
-## Hop a hand-ordered gatherer to the nearest remaining node of the same
-## resource as `prev` (the just-emptied one), claim it, and resume working.
-## Returns false if nothing suitable is in range, letting the caller go idle.
-## Only acts on active gather orders, so the autonomous economy is unaffected.
 func _gather_continue_to_nearest(prev) -> bool:
 	if not (has_player_order and order_kind == "gather"):
 		return false
@@ -521,8 +527,6 @@ func _gather_continue_to_nearest(prev) -> bool:
 	if is_instance_valid(prev) and "resource_type" in prev:
 		want_type = prev.resource_type
 
-	# Collect candidate nodes (trees, rocks, ...) of the same type that still
-	# have resource left and are within roaming range, sorted nearest-first.
 	var cands: Array = []
 	for n in get_tree().get_nodes_in_group("resources"):
 		if not is_instance_valid(n) or n == prev:
@@ -538,7 +542,6 @@ func _gather_continue_to_nearest(prev) -> bool:
 
 	cands.sort_custom(func(a, b): return a["d"] < b["d"])
 
-	# Claim the nearest that actually accepts us (skip any that are full).
 	for c in cands:
 		var n = c["n"]
 		if n.has_method("assign_worker") and not n.assign_worker(self):
@@ -546,7 +549,8 @@ func _gather_continue_to_nearest(prev) -> bool:
 		workplace = n
 		order_target = n
 		current_job = _job_for_target(n)
-		_gather_timer = 0.0
+		_gather_timer = randf_range(0.0, gather_interval * 0.5)
+		_last_move_target = Vector3(INF, INF, INF)
 		return true
 	return false
 
@@ -567,6 +571,7 @@ func _leave_workplace() -> void:
 	if is_instance_valid(workplace) and workplace.has_method("remove_worker"):
 		workplace.remove_worker(self)
 	workplace = null
+	_last_move_target = Vector3(INF, INF, INF)
 
 
 # ---------------------------------------------------------------------------
@@ -641,7 +646,8 @@ func _color_for_resource(res: String) -> Color:
 	return Color(1, 1, 1)
 
 
-func apply_network_state(p_life_stage: int, p_age: int, p_job: int, p_carried_resource: String, p_carried_amount: int) -> void:
+func apply_network_state(p_life_stage: int, p_age: int, p_job: int,
+		p_carried_resource: String, p_carried_amount: int) -> void:
 	life_stage = p_life_stage as LifeStage
 	age = p_age
 	current_job = p_job as Job

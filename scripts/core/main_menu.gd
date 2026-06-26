@@ -29,10 +29,10 @@ const LOBBY_SCENE := "res://scenes/network/lobby.tscn"
 
 func _ready() -> void:
 	# Single-player (direct launch) — each starts a local host session.
-	small_btn.pressed.connect(func():  _start_solo(Vector2(1280,  720)))
-	medium_btn.pressed.connect(func(): _start_solo(Vector2(2560, 1440)))
-	large_btn.pressed.connect(func():  _start_solo(Vector2(4096, 2304)))
-	huge_btn.pressed.connect(func():   _start_solo(Vector2(6144, 3456)))
+	small_btn.pressed.connect(func():  _start_solo(MapSettings.SIZE_SMALL))
+	medium_btn.pressed.connect(func(): _start_solo(MapSettings.SIZE_MEDIUM))
+	large_btn.pressed.connect(func():  _start_solo(MapSettings.SIZE_LARGE))
+	huge_btn.pressed.connect(func():   _start_solo(MapSettings.SIZE_HUGE))
 
 	if host_btn:
 		host_btn.pressed.connect(_on_host_pressed)
