@@ -566,13 +566,14 @@ func _receive_citizen_states(data: Array) -> void:
 ## Generic construction/health sync (every Building) PLUS an optional "extra"
 ## payload for building types that have their own host-only ticking state
 ## clients otherwise never see update: Barracks (train_queue/train_elapsed/
-## is_training) and VillageCenter (recruit_queue/recruit_elapsed/
-## is_recruiting). Both only ever progress inside _process, which is gated
-## by GameManager.is_sim_authority() — a client's local copy never runs that
-## branch, so without this push its queue/progress bar is frozen forever
-## (typically showing 0%, since the client never locally calls
-## queue_soldier()/queue_citizen() either — those are host-only, invoked via
-## request_train_unit).
+## is_training), VillageCenter (recruit_queue/recruit_elapsed/is_recruiting),
+## and Field (stage/stage_progress). All three only ever progress inside
+## _process, which is gated by GameManager.is_sim_authority() — a client's
+## local copy never runs that branch, so without this push its queue/progress
+## bar (or, for Field, its till/sow/groom/grow stage) is frozen forever at
+## whatever it was when last touched. Like the others, Field exposes its
+## extra state via apply_network_state_extra() so this stays a drop-in case
+## rather than a special path.
 ##
 ## Like the citizen-state push above, these are pure host->client PUSHes and
 ## stay gated on raw multiplayer.is_server() so they no-op in single-player.
@@ -592,6 +593,12 @@ func _building_extra_state(b: Node) -> Dictionary:
 			"recruit_elapsed": b.recruit_elapsed,
 			"is_recruiting": b.is_recruiting,
 		}
+	if b is Field:
+		return {
+			"kind": "field",
+			"stage": b.stage,
+			"stage_progress": b.stage_progress,
+		}
 	return {}
 
 
@@ -605,6 +612,9 @@ func _apply_extra_state(b: Node, extra: Dictionary) -> void:
 		"village_center":
 			if b.has_method("apply_network_state_extra"):
 				b.apply_network_state_extra(extra["recruit_queue"], extra["recruit_elapsed"], extra["is_recruiting"])
+		"field":
+			if b.has_method("apply_network_state_extra"):
+				b.apply_network_state_extra(extra["stage"], extra["stage_progress"])
 
 
 func server_sync_all_building_states() -> void:
@@ -681,7 +691,7 @@ func server_sync_resources(team: int) -> void:
 	if peer_id == 1:
 		# Host updates its own UI directly
 		_gm().resources_changed.emit(
-			res.get("food",0), res.get("wood",0), res.get("stone",0),
+			_gm().bar_food(res), res.get("wood",0), res.get("stone",0),
 			res.get("gold",0), res.get("iron",0), res.get("water",0),
 			pop.get("population",0), pop.get("housing_capacity",0)
 		)
@@ -692,7 +702,7 @@ func server_sync_resources(team: int) -> void:
 @rpc("authority", "reliable")
 func _receive_resources(res: Dictionary, pop: Dictionary) -> void:
 	_gm().resources_changed.emit(
-		res.get("food",0), res.get("wood",0), res.get("stone",0),
+		_gm().bar_food(res), res.get("wood",0), res.get("stone",0),
 		res.get("gold",0), res.get("iron",0), res.get("water",0),
 		pop.get("population",0), pop.get("housing_capacity",0)
 	)
@@ -706,6 +716,64 @@ func _find_unit(uid: int) -> Node:
 		if unit.get_meta("unit_id", -1) == uid:
 			return unit
 	return null
+
+
+# ---------------------------------------------------------------------------
+# VARIABLE-SIZE FIELD PLACEMENT  (drag-to-draw, obstacle-conforming)
+## FieldPlacer sends the list of valid cell centres (already filtered around
+## obstacles client-side) plus a centroid + cell size. The host RE-validates
+## every cell, charges per valid cell, then spawns one Field built from those
+## cells on every peer.
+# ---------------------------------------------------------------------------
+@rpc("any_peer", "reliable")
+func request_place_field(center: Vector3, cells: Array, cell: float) -> void:
+	if not _is_authority():
+		return
+	var sender_team: int = _caller_team()
+
+	# Re-validate every cell so a client can't claim blocked ground.
+	var valid: Array = []
+	for wc in cells:
+		var p: Vector3 = wc if wc is Vector3 else Vector3(wc.x, 0.0, wc.y)
+		if _gm().can_place_building_at(p, cell * 0.45):
+			valid.append(p)
+	if valid.is_empty():
+		_notify_caller("Can't lay a field there.")
+		return
+
+	var base_cost: Dictionary = _gm().COSTS.get("field", {})
+	var cost: Dictionary = {}
+	for k in base_cost:
+		cost[k] = base_cost[k] * valid.size()
+	if not _gm().can_afford_for_team(cost, sender_team):
+		_notify_caller("Not enough resources for a field that size.")
+		return
+
+	_gm().spend_for_team(cost, sender_team)
+	var net_id := _alloc_building_id()
+	if _networked():
+		_spawn_field_on_all.rpc(center, valid, cell, sender_team, net_id)
+	else:
+		_spawn_field_on_all(center, valid, cell, sender_team, net_id)
+
+
+@rpc("authority", "call_local", "reliable")
+func _spawn_field_on_all(center: Vector3, cells: Array, cell: float, team: int, net_id: int) -> void:
+	var scene_path := _building_scene("field")
+	if scene_path.is_empty():
+		return
+	var field: Node3D = load(scene_path).instantiate()
+	field.team = team
+	field.set_meta("building_net_id", net_id)
+	get_tree().current_scene.get_node("Buildings").add_child(field)
+	field.global_position = center
+	if field.has_method("set_cells"):
+		field.set_cells(cells, cell)
+	# Rebake nav on the authority only (host in MP, this peer in single-player).
+	if _is_authority():
+		var map_gen = get_tree().current_scene.get_node_or_null("MapGenerator")
+		if map_gen and map_gen.has_method("rebake_navigation"):
+			map_gen.rebake_navigation()
 
 
 func _building_scene(id: String) -> String:
@@ -728,5 +796,8 @@ func _building_scene(id: String) -> String:
 		"blacksmith":    "res://scenes/buildings/blacksmith.tscn",
 		"apothecary":    "res://scenes/buildings/apothecary.tscn",
 		"barracks":      "res://scenes/buildings/barracks.tscn",
+		"field":         "res://scenes/buildings/field.tscn",
+		"stockpile":     "res://scenes/buildings/stockpile.tscn",
+		"warehouse":     "res://scenes/buildings/warehouse.tscn",
 	}
 	return SCENES.get(id, "")

@@ -1,0 +1,43 @@
+[gd_scene format=3 uid="uid://diony20hdsu8l"]
+
+[ext_resource type="Script" uid="uid://dti68djpbesd6" path="res://scripts/buildings/warehouse.gd" id="1_warehouse"]
+
+[sub_resource type="StandardMaterial3D" id="Mat"]
+albedo_color = Color(0.5, 0.42, 0.3, 1)
+
+[sub_resource type="BoxMesh" id="Mesh"]
+material = SubResource("Mat")
+size = Vector3(72, 32, 56)
+
+[sub_resource type="BoxShape3D" id="Shape"]
+size = Vector3(72, 32, 56)
+
+[sub_resource type="StandardMaterial3D" id="RingMat"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(0, 1, 0, 0.5)
+
+[sub_resource type="CylinderMesh" id="RingMesh"]
+material = SubResource("RingMat")
+top_radius = 46.0
+bottom_radius = 46.0
+height = 0.5
+
+[node name="Warehouse" type="StaticBody3D" unique_id=2081300453 groups=["buildings", "storage", "warehouses"]]
+script = ExtResource("1_warehouse")
+
+[node name="FinishedMesh" type="MeshInstance3D" parent="." unique_id=1192191204]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 16, 0)
+mesh = SubResource("Mesh")
+
+[node name="ConstructionMesh" type="MeshInstance3D" parent="." unique_id=1724948800]
+visible = false
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=294780195]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 16, 0)
+shape = SubResource("Shape")
+
+[node name="SelectionRing" type="MeshInstance3D" parent="." unique_id=665386894]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0)
+visible = false
+mesh = SubResource("RingMesh")

@@ -13,12 +13,29 @@ signal placement_mode_changed(active: bool, building_id: String)
 signal attack_targeting_mode_changed(active: bool, radius: float)
 signal notification(text: String)
 signal demolish_mode_changed(active: bool)
+## Drawing a variable-size field plot (drag a rectangle on the map). Handled by
+## the FieldPlacer node, which draws the ghost and sends the final rect to the
+## host via NetworkCommands.request_place_field.
+signal field_draw_mode_changed(active: bool)
+
+## Field draw tuning. Plots snap to this grid, and are clamped between min/max
+## tiles per side so you can't draw a 1px or a map-spanning field.
+const FIELD_CELL := 32.0
+const FIELD_MIN_TILES := 1
+const FIELD_MAX_TILES := 10
+var is_drawing_field: bool = false
 
 # ---------------------------------------------------------------------------
 # Per-team resources  { team_int -> { resource_key -> int } }
 # ---------------------------------------------------------------------------
 var team_resources: Dictionary = {}
 var team_population: Dictionary = {}
+
+## Goods that count toward the "Food" line on the resource bar. Field wheat and
+## other edibles fold into food for display + for paying any "food" cost, while
+## still being stored under their own key. Industrial intermediates (grain,
+## flour) are deliberately NOT here — they're tracked separately for workshops.
+const FOOD_GOODS := ["food", "wheat", "vegetables", "meat", "bread"]
 
 # ---------------------------------------------------------------------------
 # Legacy single-player aliases (read my own team)
@@ -32,7 +49,7 @@ var water:  int: get = _get_water
 var population:       int: get = _get_pop
 var housing_capacity: int: get = _get_housing
 
-func _get_food()    -> int: return _res("food")
+func _get_food()    -> int: return bar_food(team_resources.get(_my_team(), {}))
 func _get_wood()    -> int: return _res("wood")
 func _get_stone()   -> int: return _res("stone")
 func _get_gold()    -> int: return _res("gold")
@@ -139,6 +156,13 @@ const COSTS := {
 	"blacksmith":  {"wood": 50, "stone": 20},
 	"apothecary":  {"wood": 40},
 	"barracks":    {"wood": 80, "stone": 40},
+	## Farming. Fields are cheap and built often — they're a plot of dirt, not
+	## a structure — so the cost is deliberately low. Stockpile costs sit
+	## between a House and a Well, reflecting it being a simple but real
+	## structure rather than a worked plot.
+	"field":       {"wood": 15},
+	"stockpile":   {"wood": 35, "stone": 10},
+	"warehouse":   {"wood": 80, "stone": 40},
 	"soldier":     {"food": 60, "gold": 10},
 	"artillery":   {"food": 90, "wood": 20, "iron": 20, "gold": 20},
 }
@@ -146,6 +170,7 @@ const COSTS := {
 const BUILD_TIMES := {
 	"house": 6.0, "farm": 6.0, "lumber_camp": 7.0, "quarry": 7.0,
 	"mine": 8.0, "barracks": 10.0, "soldier": 8.0, "artillery": 14.0,
+	"field": 4.0, "stockpile": 5.0, "warehouse": 12.0,
 }
 
 # ---------------------------------------------------------------------------
@@ -205,13 +230,13 @@ func _yearly_tick() -> void:
 	for team in team_resources.keys():
 		var res  := team_resources[team] as Dictionary
 		var pop  := team_population[team].get("population", 0) as int
-		if res["food"] >= pop:
-			res["food"] -= pop
+		var have_food := bar_food(res)
+		if have_food >= pop:
+			_withdraw_from_storage(team, "food", pop)
 		else:
-			var deficit: Variant = pop - res["food"]
-			res["food"] = 0
-			_starve(deficit, team)
-		_nc().server_sync_resources(team)
+			_withdraw_from_storage(team, "food", have_food)
+			_starve(pop - have_food, team)
+		recompute_storage(team)
 
 	for c in all_citizens.duplicate():
 		if is_instance_valid(c):
@@ -234,10 +259,10 @@ func _check_births() -> void:
 		var pop: Variant = team_population[team]
 		var free: Variant = pop["housing_capacity"] - pop["population"]
 		var res: Variant = team_resources[team]
-		if free <= 0 or res["food"] < 30:
+		if free <= 0 or bar_food(res) < 30:
 			continue
 		var pairs  := int(adult_count / 2.0)
-		var births := mini(pairs, mini(free, int(res["food"] / 15.0)))
+		var births := mini(pairs, mini(free, int(bar_food(res) / 15.0)))
 		for _i in births:
 			_spawn_child(team)
 
@@ -261,10 +286,82 @@ func _spawn_child(team: int) -> void:
 	all_citizens.append(child)
 	child_count += 1
 	team_population[team]["population"] += 1
-	team_resources[team]["food"] -= 15
+	_withdraw_from_storage(team, "food", 15)
 	citizen_born.emit(child)
+	recompute_storage(team)
+
+
+# ---------------------------------------------------------------------------
+# Storage aggregation — the left bar = the SUM of every storage building a team
+# owns (Stockpiles, Warehouses, and the Village Center, which also stores
+# goods). team_resources[team] is a derived cache of that sum, recomputed
+# whenever any storage changes and pushed to the UI.
+# ---------------------------------------------------------------------------
+func _team_storage(team: int) -> Array:
+	var out: Array = []
+	for s in get_tree().get_nodes_in_group("storage"):
+		if not is_instance_valid(s):
+			continue
+		if "team" in s and s.team != team:
+			continue
+		out.append(s)
+	return out
+
+
+## Recompute team_resources[team] from physical storage contents, then sync +
+## refresh UI. No-op (leaves the seeded pool untouched) until the team actually
+## has a storage building, so the start grant survives the moment before the
+## Village Center is founded.
+func recompute_storage(team: int) -> void:
+	if not is_sim_authority():
+		return
+	var stores := _team_storage(team)
+	if stores.is_empty():
+		return
+	var totals: Dictionary = {}
+	for s in stores:
+		var inv: Dictionary = s.inventory if "inventory" in s else {}
+		for k in inv:
+			totals[k] = totals.get(k, 0) + inv[k]
+	# Guarantee the six canonical keys always exist so the bar has them.
+	for key in ["food", "wood", "stone", "gold", "iron", "water"]:
+		totals[key] = totals.get(key, 0)
+	team_resources[team] = totals
 	_nc().server_sync_resources(team)
 	update_ui()
+
+
+## "Food" shown on the bar = every food-like good summed together.
+func bar_food(res: Dictionary) -> int:
+	var n := 0
+	for k in FOOD_GOODS:
+		n += res.get(k, 0)
+	return n
+
+
+## Pull `amt` of `key` out of a team's storage buildings (a "food" cost may be
+## paid from any food-like good). Mutates inventories directly; the caller is
+## expected to recompute_storage() afterwards. Returns how much was removed.
+func _withdraw_from_storage(team: int, key: String, amt: int) -> int:
+	var keys: Array = FOOD_GOODS if key == "food" else [key]
+	var remaining := amt
+	for s in _team_storage(team):
+		if remaining <= 0:
+			break
+		if not ("inventory" in s):
+			continue
+		for kk in keys:
+			if remaining <= 0:
+				break
+			var have: int = s.inventory.get(kk, 0)
+			if have <= 0:
+				continue
+			var take := mini(have, remaining)
+			s.inventory[kk] = have - take
+			if s.inventory[kk] <= 0:
+				s.inventory.erase(kk)
+			remaining -= take
+	return amt - remaining
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +370,8 @@ func _spawn_child(team: int) -> void:
 func can_afford_for_team(cost: Dictionary, team: int) -> bool:
 	var res: Variant = team_resources.get(team, {})
 	for k in cost:
-		if res.get(k, 0) < cost[k]:
+		var have: int = bar_food(res) if k == "food" else res.get(k, 0)
+		if have < cost[k]:
 			return false
 	return true
 
@@ -281,21 +379,25 @@ func can_afford_for_team(cost: Dictionary, team: int) -> bool:
 func spend_for_team(cost: Dictionary, team: int) -> void:
 	if not is_sim_authority():
 		return
-	var res: Variant = team_resources[team]
 	for k in cost:
-		res[k] = maxi(0, res.get(k, 0) - cost[k])
-	_nc().server_sync_resources(team)
-	update_ui()
+		_withdraw_from_storage(team, k, cost[k])
+	recompute_storage(team)   # rewrites team_resources + syncs + update_ui
 
 
 func add_resources_for_team(team: int, amounts: Dictionary) -> void:
 	if not is_sim_authority():
 		return
-	var res: Variant = team_resources.get(team, {})
+	# Route incoming goods into actual storage so the bar stays the true sum.
 	for k in amounts:
-		res[k] = res.get(k, 0) + amounts[k]
-	_nc().server_sync_resources(team)
-	update_ui()
+		var amt: int = amounts[k]
+		for s in _team_storage(team):
+			if amt <= 0:
+				break
+			if s.has_method("accepts_resource") and not s.accepts_resource(k):
+				continue
+			if s.has_method("deposit"):
+				amt -= s.deposit(k, amt)
+	recompute_storage(team)
 
 
 ## Legacy single-player helpers — operate on MY team
@@ -315,7 +417,7 @@ func update_ui() -> void:
 	var res: Variant = team_resources.get(team, {})
 	var pop: Variant = team_population.get(team, {})
 	resources_changed.emit(
-		res.get("food",0), res.get("wood",0), res.get("stone",0),
+		bar_food(res), res.get("wood",0), res.get("stone",0),
 		res.get("gold",0), res.get("iron",0), res.get("water",0),
 		pop.get("population",0), pop.get("housing_capacity",0)
 	)
@@ -485,6 +587,24 @@ func start_demolish_mode() -> void:
 func cancel_demolish_mode() -> void:
 	is_demolish_mode = false
 	demolish_mode_changed.emit(false)
+
+
+# ---------------------------------------------------------------------------
+# Field draw mode  (variable-size plot — local UI state; FieldPlacer drives it)
+# ---------------------------------------------------------------------------
+func start_field_draw() -> void:
+	cancel_building_placement()
+	if is_demolish_mode:
+		cancel_demolish_mode()
+	is_drawing_field = true
+	field_draw_mode_changed.emit(true)
+
+
+func cancel_field_draw() -> void:
+	if not is_drawing_field:
+		return
+	is_drawing_field = false
+	field_draw_mode_changed.emit(false)
 
 
 func can_place_building_at(world_pos: Vector3, footprint_radius: float = 36.0) -> bool:

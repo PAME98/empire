@@ -50,6 +50,8 @@ const BUILDING_SCENES := {
 	"blacksmith":    "res://scenes/buildings/blacksmith.tscn",
 	"apothecary":    "res://scenes/buildings/apothecary.tscn",
 	"barracks":      "res://scenes/buildings/barracks.tscn",
+	"field":         "res://scenes/buildings/field.tscn",
+	"stockpile":     "res://scenes/buildings/stockpile.tscn",
 }
 
 const DEPOSIT_BUILDINGS      := ["quarry", "mine"]

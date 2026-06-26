@@ -1,0 +1,19 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/buildings/field.gd" id="1_field"]
+
+[sub_resource type="BoxShape3D" id="Shape"]
+size = Vector3(32, 8, 32)
+
+[node name="Field" type="StaticBody3D" groups=["buildings", "fields"]]
+script = ExtResource("1_field")
+building_scale = 1.0
+
+[node name="FinishedMesh" type="Node3D" parent="."]
+
+[node name="ConstructionMesh" type="MeshInstance3D" parent="."]
+visible = false
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, 0)
+shape = SubResource("Shape")

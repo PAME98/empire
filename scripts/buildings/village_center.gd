@@ -12,9 +12,14 @@ extends Building
 @export var spawn_offset: Vector3 = Vector3(0, 0, 86)
 @export var recruit_time: float = 5.0
 
+## The town center doubles as the team's first storage building so gathered
+## goods and the starting grant physically live somewhere the bar can sum.
+@export var capacity: int = 2000
+
 var recruit_queue: Array = []  # [{type, duration}]
 var recruit_elapsed: float = 0.0
 var is_recruiting: bool = false
+var inventory: Dictionary = {}
 
 @onready var recruit_bar: ProgressBar = get_node_or_null("RecruitBar")
 
@@ -22,10 +27,54 @@ var is_recruiting: bool = false
 func _ready() -> void:
 	super._ready()
 	add_to_group("village_centers")
+	add_to_group("storage")
 	if not is_constructed:
 		finish_building()
+	if GameManager.is_sim_authority():
+		# Starting grant now physically sits in the town center's stores, so the
+		# left bar (which sums storage) reads it correctly from frame one.
+		inventory = {"food": 250, "wood": 200, "stone": 100, "gold": 50, "iron": 0, "water": 60}
+		GameManager.recompute_storage(team)
 	if recruit_bar:
 		recruit_bar.visible = false
+
+
+# ---------------------------------------------------------------------------
+# Storage interface (same surface StorageBuilding exposes; VC can't also extend
+# it since it already extends Building). The town center accepts every good.
+# ---------------------------------------------------------------------------
+func accepts_resource(_type: String) -> bool:
+	return true
+
+func stored_total() -> int:
+	var n := 0
+	for k in inventory:
+		n += inventory[k]
+	return n
+
+func free_space() -> int:
+	return maxi(0, capacity - stored_total())
+
+func deposit(type: String, amt: int) -> int:
+	if amt <= 0:
+		return 0
+	var stored := mini(amt, free_space())
+	if stored <= 0:
+		return 0
+	inventory[type] = inventory.get(type, 0) + stored
+	GameManager.recompute_storage(team)
+	return stored
+
+func withdraw(type: String, amt: int) -> int:
+	var have: int = inventory.get(type, 0)
+	var taken := mini(amt, have)
+	if taken <= 0:
+		return 0
+	inventory[type] = have - taken
+	if inventory[type] <= 0:
+		inventory.erase(type)
+	GameManager.recompute_storage(team)
+	return taken
 
 
 func _process(delta: float) -> void:

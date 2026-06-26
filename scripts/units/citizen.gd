@@ -20,7 +20,7 @@ extends Unit
 ##     don't all pick the same building in the same frame.
 
 enum LifeStage { CHILD, ADULT, ELDER }
-enum Job { NONE, FARMER, WOODCUTTER, MINER, BUILDER, TRADER, WATERCARRIER }
+enum Job { NONE, FARMER, WOODCUTTER, MINER, BUILDER, TRADER, WATERCARRIER, FIELDHAND, HAULER }
 
 const CHILD_TO_ADULT_AGE := 14
 const ADULT_TO_ELDER_AGE := 50
@@ -31,6 +31,12 @@ const GATHER_CONTINUE_RANGE := 1600.0
 ## Minimum seconds between re-issuing a move_to() while already travelling to
 ## the same target. Prevents resetting the nav path (and avoidance) every tick.
 const REPATH_INTERVAL: float = 0.6
+
+## Field stage_*_time values are seconds of labour, so a worked field advances
+## at 1 progress-unit per second.
+const FIELD_WORK_RATE := 1.0
+## How close a hauler must be to a dropped crop pile to pick it up.
+const PICKUP_RANGE := 40.0
 
 @export var carry_capacity: int = 8
 @export var gather_interval: float = 1.2
@@ -164,7 +170,7 @@ func age_up() -> void:
 
 
 func _retire_from_labor() -> void:
-	if current_job in [Job.FARMER, Job.WOODCUTTER, Job.MINER, Job.BUILDER]:
+	if current_job in [Job.FARMER, Job.WOODCUTTER, Job.MINER, Job.BUILDER, Job.FIELDHAND, Job.HAULER]:
 		_leave_workplace()
 		current_job = Job.NONE
 
@@ -183,6 +189,10 @@ func _run_auto_job(delta: float) -> void:
 	match current_job:
 		Job.FARMER, Job.MINER, Job.WOODCUTTER:
 			_auto_work_job(delta)
+		Job.FIELDHAND:
+			_work_field(delta)
+		Job.HAULER:
+			_haul(delta)
 		Job.BUILDER:
 			if not is_instance_valid(order_target) \
 					or (order_target.has_method("is_constructed") and order_target.is_constructed):
@@ -204,6 +214,14 @@ func _try_autofind_job() -> bool:
 		return false
 
 	if _autofind_construction():
+		return true
+
+	# Fields that need tilling/sowing/grooming/harvesting, and loose crop piles
+	# waiting to be hauled, take priority over staffing standing producers so
+	# the harvest loop keeps flowing.
+	if _autofind_field():
+		return true
+	if _autofind_haul():
 		return true
 
 	var candidates = [
@@ -254,6 +272,161 @@ func _autofind_construction() -> bool:
 	workplace    = null
 	order_target = best
 	return true
+
+
+# ---------------------------------------------------------------------------
+# Field work (till / sow / groom / harvest) + crop hauling
+# ---------------------------------------------------------------------------
+func _autofind_field() -> bool:
+	var best = null
+	var best_dist := INF
+	for f in get_tree().get_nodes_in_group("fields_needing_work"):
+		if not is_instance_valid(f) or not f.is_constructed:
+			continue
+		if "team" in f and f.team != team:
+			continue
+		if not f.has_method("assign_worker"):
+			continue
+		if f.has_method("worker_count") and "max_workers" in f and f.worker_count() >= f.max_workers:
+			continue
+		var d := global_position.distance_to(f.global_position)
+		if d < best_dist:
+			best_dist = d
+			best = f
+	if best != null and best.assign_worker(self):
+		current_job = Job.FIELDHAND
+		workplace   = best
+		_gather_timer = randf_range(0.0, 0.5)
+		return true
+	return false
+
+
+func _autofind_haul() -> bool:
+	if _nearest_storage() == null:
+		return false  # nowhere to take goods — don't bother picking them up
+	var best = null
+	var best_dist := INF
+	for p in get_tree().get_nodes_in_group("dropped_items"):
+		if not is_instance_valid(p):
+			continue
+		if p.has_method("is_claimed_by_other") and p.is_claimed_by_other(self):
+			continue
+		var d := global_position.distance_to(p.global_position)
+		if d < best_dist:
+			best_dist = d
+			best = p
+	if best == null:
+		return false
+	if best.has_method("claim") and not best.claim(self):
+		return false
+	current_job  = Job.HAULER
+	order_target = best
+	workplace    = null
+	return true
+
+
+func _work_field(delta: float) -> void:
+	var field = workplace
+	if not is_instance_valid(field):
+		current_job = Job.NONE
+		workplace = null
+		return
+	# Stage finished (the field is now growing on its own) — let go and find
+	# other work rather than loiter on a plot that needs no labour.
+	if field.has_method("needs_worker") and not field.needs_worker():
+		release_from_field(field)
+		return
+	var wp_pos := _work_pos(field)
+	if global_position.distance_to(wp_pos) > interaction_range_for(field) and not has_stalled_near_target():
+		_move_toward(wp_pos)
+		return
+	stop()
+	field.add_field_progress(FIELD_WORK_RATE * delta)
+
+
+## Called by Field when a stage stops needing labour, and by _work_field.
+func release_from_field(field) -> void:
+	if is_instance_valid(field) and field.has_method("remove_worker"):
+		field.remove_worker(self)
+	if workplace == field:
+		workplace = null
+	if current_job == Job.FIELDHAND:
+		current_job = Job.NONE
+	_last_move_target = Vector3(INF, INF, INF)
+
+
+func _haul(_delta: float) -> void:
+	if carried_amount > 0:
+		_deliver_to_storage()
+		return
+	var pile = order_target
+	if not is_instance_valid(pile) or (pile.has_method("is_empty") and pile.is_empty()):
+		order_target = null
+		current_job = Job.NONE
+		return
+	if global_position.distance_to(pile.global_position) > PICKUP_RANGE and not has_stalled_near_target():
+		_move_toward(pile.global_position)
+		return
+	stop()
+	var got: int = pile.take(carry_capacity)
+	if got > 0:
+		carried_amount += got
+		if "resource_type" in pile:
+			carried_resource = pile.resource_type
+	if pile.has_method("release"):
+		pile.release(self)
+	order_target = null
+	if carried_amount > 0:
+		_deliver_to_storage()
+	else:
+		current_job = Job.NONE
+
+
+func _nearest_storage(type: String = ""):
+	var best = null
+	var best_dist := INF
+	for s in get_tree().get_nodes_in_group("storage"):
+		if not is_instance_valid(s) or not s.is_constructed:
+			continue
+		if "team" in s and s.team != team:
+			continue
+		if type != "" and s.has_method("accepts_resource") and not s.accepts_resource(type):
+			continue
+		if s.has_method("free_space") and s.free_space() <= 0:
+			continue
+		var d := global_position.distance_to(s.global_position)
+		if d < best_dist:
+			best_dist = d
+			best = s
+	return best
+
+
+func _deliver_to_storage() -> void:
+	if carried_amount <= 0:
+		is_delivering = false
+		current_job = Job.NONE
+		return
+	var store = _nearest_storage(carried_resource)
+	if store == null:
+		# Nothing with room/acceptance — fall back to the village-center path,
+		# which is itself storage and also spills to other storage.
+		is_delivering = true
+		_continue_delivery()
+		return
+	var dp := _delivery_pos(store)
+	if global_position.distance_to(dp) > interaction_range_for(store) and not has_stalled_near_target():
+		is_delivering = true
+		_move_toward(dp)
+		return
+	stop()
+	var stored: int = store.deposit(carried_resource, carried_amount) if store.has_method("deposit") else 0
+	carried_amount -= stored
+	if carried_amount <= 0:
+		carried_resource = ""
+		is_delivering = false
+		current_job = Job.NONE
+		_last_move_target = Vector3(INF, INF, INF)
+	# else: storage filled mid-drop; next frame picks another storage building.
 
 
 func _auto_work_job(delta: float) -> void:
@@ -488,7 +661,12 @@ func _continue_delivery() -> void:
 		return
 	stop()
 	if carried_amount > 0 and carried_resource != "":
-		GameManager.add_resources_for_team(team, {carried_resource: carried_amount})
+		var left := carried_amount
+		if center.has_method("deposit"):
+			left -= center.deposit(carried_resource, carried_amount)
+		if left > 0:
+			# Center full — spill into any other storage building with room.
+			GameManager.add_resources_for_team(team, {carried_resource: left})
 	carried_amount = 0
 	carried_resource = ""
 	is_delivering = false
@@ -621,6 +799,8 @@ func _refresh_appearance() -> void:
 	if job_icon:
 		match current_job:
 			Job.FARMER:       _set_mesh_color(job_icon, Color(0.2, 0.8, 0.2))
+			Job.FIELDHAND:    _set_mesh_color(job_icon, Color(0.55, 0.75, 0.2))
+			Job.HAULER:       _set_mesh_color(job_icon, Color(0.85, 0.6, 0.25))
 			Job.WOODCUTTER:   _set_mesh_color(job_icon, Color(0.5, 0.32, 0.1))
 			Job.MINER:        _set_mesh_color(job_icon, Color(0.55, 0.55, 0.55))
 			Job.BUILDER:      _set_mesh_color(job_icon, Color(0.9, 0.7, 0.2))
@@ -641,6 +821,9 @@ func _color_for_resource(res: String) -> Color:
 		"wood":  return Color(0.45, 0.27, 0.1)
 		"stone": return Color(0.6, 0.6, 0.6)
 		"food":  return Color(0.9, 0.75, 0.2)
+		"wheat", "grain", "flour": return Color(0.85, 0.7, 0.2)
+		"vegetables": return Color(0.4, 0.65, 0.3)
+		"meat":  return Color(0.7, 0.35, 0.3)
 		"iron":  return Color(0.36, 0.36, 0.42)
 		"water": return Color(0.3, 0.55, 0.85)
 	return Color(1, 1, 1)
@@ -659,6 +842,8 @@ func apply_network_state(p_life_stage: int, p_age: int, p_job: int,
 func job_label() -> String:
 	match current_job:
 		Job.FARMER:       return "Farmer"
+		Job.FIELDHAND:    return "Field Hand"
+		Job.HAULER:       return "Hauler"
 		Job.WOODCUTTER:   return "Woodcutter"
 		Job.MINER:        return "Miner"
 		Job.BUILDER:      return "Builder"

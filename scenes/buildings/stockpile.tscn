@@ -1,0 +1,43 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/buildings/stockpile.gd" id="1_stockpile"]
+
+[sub_resource type="BoxShape3D" id="Shape"]
+size = Vector3(48, 10, 48)
+
+[sub_resource type="StandardMaterial3D" id="Mat"]
+albedo_color = Color(0.62, 0.52, 0.34, 1)
+
+[sub_resource type="BoxMesh" id="Mesh"]
+material = SubResource("Mat")
+size = Vector3(48, 10, 48)
+
+[sub_resource type="StandardMaterial3D" id="RingMat"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(0, 1, 0, 0.5)
+
+[sub_resource type="CylinderMesh" id="RingMesh"]
+material = SubResource("RingMat")
+top_radius = 34.0
+bottom_radius = 34.0
+height = 0.5
+
+[node name="Stockpile" type="StaticBody3D" groups=["buildings", "storage", "stockpiles"]]
+script = ExtResource("1_stockpile")
+
+[node name="FinishedMesh" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 0)
+mesh = SubResource("Mesh")
+
+[node name="ConstructionMesh" type="MeshInstance3D" parent="."]
+visible = false
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 0)
+shape = SubResource("Shape")
+
+[node name="SelectionRing" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0)
+visible = false
+mesh = SubResource("RingMesh")
